@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "classroom-flowsim"
+dynamic = ["version"]
+description = "A small declarative service-network simulator built on SimPy."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Nickolas K Freeman", email = "nick.freeman524@gmail.com" }]
+requires-python = ">=3.12"
+# Floors are the versions the Pixi environment tests. The engine schedules
+# SimPy events with a custom priority, so SimPy is held to the 4.1 series.
+dependencies = [
+    "simpy>=4.1.2,<4.2",
+    "numpy>=2.5.4,<3",
+    "polars>=2,<3",
+    "networkx>=3.7,<4",
+    "plotly>=7.1,<8",
+    "scipy>=1.18.1,<2",
+]
+
+[project.urls]
+Repository = "https://github.com/nkfreeman-teaching/flowsim"
+
+[tool.setuptools.dynamic]
+version = { attr = "flowsim.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["flowsim*"]
+
+[tool.setuptools.package-data]
+flowsim = ["viewer.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers --strict-config"
+timeout = 120
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["examples/__marimo__"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

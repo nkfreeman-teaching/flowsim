@@ -1,0 +1,4 @@
+# SCM syntax highlighting & preventing 3-way merges
+pixi.lock merge=binary linguist-language=YAML linguist-generated=true -diff
+# Keep LF line endings on every platform, including Windows checkouts.
+* text=auto eol=lf

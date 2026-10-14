@@ -1,0 +1,38 @@
+[workspace]
+authors = ["Nickolas K Freeman <nick.freeman524@gmail.com>"]
+channels = ["conda-forge"]
+name = "flowsim"
+platforms = ["linux-64", "win-64", "osx-arm64", "osx-64"]
+
+[tasks]
+test = "python -m pytest -q"
+lint = "ruff check flowsim examples tests"
+format = "ruff format flowsim examples tests"
+format-check = "ruff format --check flowsim examples tests"
+notebook-check = "marimo check --strict examples/lesson.py"
+check = { depends-on = ["test", "lint", "format-check", "notebook-check"] }
+demo = "python -m examples.run_examples"
+notebook = "marimo edit examples/lesson.py"
+notebook-export = "marimo export html examples/lesson.py -o output/lesson.html"
+exercise = "python -m examples.service_day"
+extensions = "python -m examples.extensions"
+# Run every example end to end, including the notebook, after behavioral changes.
+examples = { depends-on = ["demo", "exercise", "extensions", "notebook-export"] }
+
+[dependencies]
+python = ">=3.12,<3.14"
+numpy = ">=2.5.4,<3"
+polars = ">=2.0.0,<3"
+networkx = ">=3.7,<4"
+plotly = ">=7.1.0,<8"
+scipy = ">=1.18.1,<2"
+marimo = ">=0.25.1,<0.26"
+pytest = ">=9.1.1,<10"
+ruff = ">=0.17.0,<0.18"
+simpy = "==4.1.2"
+setuptools = ">=84.0.0,<85"
+pytest-timeout = ">=2.4.0,<3"
+
+[pypi-dependencies]
+classroom-flowsim = { path = ".", editable = true }
+playwright = ">=1.64.0, <2"
