@@ -127,6 +127,33 @@ def test_shift_end_rules_preserve_work_and_waits(policy, starts, ends):
     assert sum(row["end"] - row["start"] for row in processing.to_dicts()) == 12
 
 
+def test_decimal_service_that_ends_at_a_shift_change_finishes_then():
+    # By hand, service runs from 0.1 to 0.1 + 0.2 = 0.3, when the shift ends.
+    # In floating point, 0.1 + 0.2 is 0.30000000000000004, one representable
+    # time after the shift change at 0.3.
+    model = Model()
+    source = model.source(
+        name="Customers",
+        interarrival=1,
+        first_arrival=0.1,
+        limit=1,
+    )
+    station = model.station(
+        name="Service",
+        capacity=1,
+        service_time=0.2,
+        staffing=[(0, 1), (0.3, 0), (5, 1)],
+        shift_end="pause",
+    )
+    model.route([source, station, model.exit])
+    result = model.run(
+        duration=6,
+        drain=True,
+    )
+    assert result.visits.get_column("service_end").to_list() == [0.3]
+    assert result.activities.get_column("state").to_list() == ["processing"]
+
+
 def test_staffing_initially_zero_waits_until_a_server_is_scheduled():
     result = single_station(
         staffing=[(0, 0), (5, 1)],

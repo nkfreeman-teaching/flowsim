@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -98,14 +99,17 @@ class _Server:
             if not running():
                 yield self.changed
                 continue
-            started = scheduler.now
+            # The scheduler queues the timeout at now + remaining, so it lands
+            # exactly at this deadline.
+            deadline = scheduler.now + remaining
             timeout = scheduler.timeout(remaining)
             result = yield scheduler.any_of([timeout, self.changed])
-            remaining = (
-                0.0
-                if timeout in result
-                else max(0.0, remaining - (scheduler.now - started))
-            )
+            # A deadline at most one representable time after now is now.
+            # Otherwise 0.1 + 0.2 lands just after a shift change at 0.3, and the
+            # remainder pauses work that ends at the shift change by hand.
+            if timeout in result or deadline <= math.nextafter(scheduler.now, math.inf):
+                return
+            remaining = deadline - scheduler.now
 
     def failures(self):
         node = self.station.node

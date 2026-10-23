@@ -38,8 +38,8 @@ outputs.
 
 | # | Change | Where | Found by | Outputs | Status |
 |---|---|---|---|---|---|
-| 1.1 | Lesson viewers replaced by Marimo size warnings | `pyproject.toml`, `pixi.toml` | Codex | Lesson display only | done |
-| 1.2 | Decimal times leave a tiny remainder that pauses finished work | `flowsim/station.py:94-108` | Opus | Yes, rare runs | open |
+| 1.1 | Lesson viewers replaced by Marimo size warnings | `pyproject.toml`, `pixi.toml` | Codex | Lesson display only | done (f581522) |
+| 1.2 | Decimal times leave a tiny remainder that pauses finished work | `flowsim/station.py:94-108` | Opus | Yes, rare runs | done |
 | 1.3 | A non-advancing failure and repair cycle hangs the run | `flowsim/station.py:110-151` | Codex | Error instead of hang | open |
 | 1.4 | Make "shift changes first" an explicit priority and fix the tie-order wording | `scheduler.py`, `engine.py:18-23`, `station.py:173-180`, README, AGENTS.md | Opus, Sonnet | None expected | open |
 | 1.5 | Add the missing tie-order and shared-admission tests | `tests/` | Sonnet, Opus | None | open |
@@ -62,10 +62,15 @@ at 0.1 with service 0.2 and `staffing=[(0, 1), (0.3, 0), (5, 1)]`, `shift_end="p
 `service_end` 5.0 with a paused span from 0.3 to 5.0, because 0.1 + 0.2 is 0.30000000000000004. By
 hand the service ends at 0.3. The whole-number version (1, 2, shift at 3) is correct. Fix: keep
 `deadline = started + remaining` and set `remaining = deadline - now` after each wake. Treat the
-work as finished when `now + remaining == now`, i.e., when the remainder cannot advance the clock.
-This test needs no tolerance constant, and it also covers failure lifetimes. Keep creating one new
+work as finished when the deadline is at most `math.nextafter(now, math.inf)`, i.e., when it is
+now or the next representable time. (The first proposal, `now + remaining == now`, fails this
+test, because the deadline 0.30000000000000004 is one representable time after the shift change
+at 0.3.) This test needs no tolerance constant, and it also covers failure lifetimes. Keep creating one new
 timeout per wake as now (see deferred item D1), so event sequence numbers do not change. Test: the
-decimal model above, expecting `service_end == 0.3` and no paused activity.
+decimal model above, expecting `service_end == 0.3` and no paused activity. Outputs (owner accepted
+2026-10-23): the finishing rule changes no example, but the deadline arithmetic moves the
+repairing-machine example by one rounding step, in a service resumed after a failure (customer 31,
+2.8e-14 earlier) and the next service on that server.
 
 **1.3.** Checked: `time_to_failure=1e-100`, `repair_time=0`, `failure_clock="available"` hangs
 `run()` (stopped by a 10-second alarm), with or without a staffing schedule. Each failure and
