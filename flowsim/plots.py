@@ -45,6 +45,26 @@ def style(figure: go.Figure, x_label: str, y_label: str) -> go.Figure:
     return figure
 
 
+def station_menu(figure: go.Figure, stations: list[str]) -> None:
+    """Add a station menu that shows the traces whose meta names that station.
+
+    The viewer's station choice selects traces by the same meta value.
+    """
+    if not stations:
+        return
+    buttons = [
+        {
+            "label": label(station),
+            "method": "update",
+            "args": [{"visible": [trace.meta == station for trace in figure.data]}],
+        }
+        for station in stations
+    ]
+    figure.update_layout(
+        updatemenus=[{"buttons": buttons, "x": 1, "y": 1.16, "xanchor": "right"}],
+    )
+
+
 def network_diagram(model: Model) -> go.Figure:
     graph = model.graph
     positions = {}
@@ -140,24 +160,15 @@ def queue_plot(result: Results) -> go.Figure:
                     mode="lines",
                     line={"shape": "hv", "color": color, "width": 2},
                     visible=index == 0,
+                    meta=station,
                     hovertemplate=f"%{{x:.2f}} {label(result.time_unit)}"
                     "<br>%{y} customers<extra>%{fullData.name}</extra>",
                 )
             )
-    if result.capacities:
-        buttons = []
-        for index, station in enumerate(result.capacities):
-            visible = [trace // 2 == index for trace in range(len(figure.data))]
-            buttons.append(
-                {
-                    "label": label(station),
-                    "method": "update",
-                    "args": [{"visible": visible}],
-                }
-            )
-        figure.update_layout(
-            updatemenus=[{"buttons": buttons, "x": 1, "y": 1.16, "xanchor": "right"}],
-        )
+    station_menu(
+        figure=figure,
+        stations=list(result.capacities),
+    )
     style(
         figure=figure,
         x_label=f"Simulation time ({result.time_unit})",
@@ -190,31 +201,16 @@ def wait_plot(result: Results) -> go.Figure:
                 x=waits,
                 name=label(station),
                 visible=index == 0,
+                meta=station,
                 marker={"color": BLUE, "line": {"color": "black", "width": 1}},
                 hovertemplate="Wait bin: %{x}<br>Customers: %{y}<extra></extra>",
             )
         )
-    if result.capacities:
-        figure.update_layout(
-            updatemenus=[
-                {
-                    "x": 1,
-                    "y": 1.16,
-                    "xanchor": "right",
-                    "buttons": [
-                        {
-                            "label": label(name),
-                            "method": "update",
-                            "args": [
-                                {"visible": [j == i for j in range(len(figure.data))]}
-                            ],
-                        }
-                        for i, name in enumerate(result.capacities)
-                    ],
-                }
-            ],
-            showlegend=False,
-        )
+    station_menu(
+        figure=figure,
+        stations=list(result.capacities),
+    )
+    figure.update_layout(showlegend=False)
     return style(
         figure=figure,
         x_label=f"Waiting time ({result.time_unit})",
@@ -273,25 +269,19 @@ def resource_plot(result: Results) -> go.Figure:
                         else "solid",
                     },
                     visible=index == 0,
+                    meta=station,
                 )
             )
-    buttons = [
-        {
-            "label": label(name),
-            "method": "update",
-            "args": [
-                {"visible": [j // len(fields) == i for j in range(len(figure.data))]}
-            ],
-        }
-        for i, name in enumerate(result.capacities)
-    ]
+    station_menu(
+        figure=figure,
+        stations=list(result.capacities),
+    )
     style(
         figure=figure,
         x_label=f"Simulation time ({result.time_unit})",
         y_label="Servers",
     )
     figure.update_layout(
-        updatemenus=[{"buttons": buttons, "x": 1, "y": 1.16, "xanchor": "right"}],
         legend={"orientation": "v", "x": 1.02, "y": 1},
         margin={"l": 85, "r": 175, "t": 60, "b": 70},
     )

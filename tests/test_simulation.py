@@ -600,6 +600,30 @@ def test_viewer_escapes_model_text_and_plots_are_not_notebook_objects():
         result.customer_plot(99)
 
 
+def test_station_menus_select_traces_by_station_meta():
+    # Check-in and Service each draw two queue traces, one wait histogram, and
+    # six resource traces, so the Service button shows the second block.
+    result = service_network().run(
+        duration=30,
+        seed=1,
+    )
+    expected = {
+        "queue_plot": [False, False, True, True],
+        "wait_plot": [False, True],
+        "resource_plot": [False] * 6 + [True] * 6,
+    }
+    for method, visible in expected.items():
+        figure = getattr(result, method)()
+        stations = [trace.meta for trace in figure.data]
+        assert stations == ["Check-in"] * (len(visible) // 2) + ["Service"] * (
+            len(visible) // 2
+        )
+        buttons = figure.layout.updatemenus[0].buttons
+        assert [button.label for button in buttons] == ["Check-in", "Service"]
+        assert list(buttons[1].args[0]["visible"]) == visible
+        assert list(buttons[0].args[0]["visible"]) == [not shown for shown in visible]
+
+
 def test_completions_precede_arrivals_at_equal_times():
     # Arrivals at 0, 2, 4, 6, 8 each need 2 minutes. Each server release at
     # 2, 4, 6, 8 happens before the arrival at the same instant, so a station

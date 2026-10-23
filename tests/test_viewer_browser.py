@@ -29,7 +29,7 @@ def test_offline_viewer_controls_and_download(tmp_path, offline_page, drain):
         "Check-in",
         "Service",
     ]
-    page.select_option("#station-choice", "1")
+    page.select_option("#station-choice", "Service")
     page.wait_for_function("document.getElementById('queues').data[2].visible === true")
     assert page.evaluate(
         "document.getElementById('queues').data.map(trace => trace.visible)"
@@ -136,9 +136,16 @@ def test_extended_viewer_shows_resource_states_rejections_and_paused_work(
     assert page.locator("#resources-section").is_visible()
     assert page.locator("#failure-records tbody tr").count() == result.failures.height
     assert "Rejected arrivals:" in page.locator("#notice").inner_text()
-    page.select_option("#station-choice", "1")
+    page.select_option("#station-choice", "Finishing")
     page.wait_for_function(
         "document.getElementById('resources').data[6].visible === true"
+    )
+    # Assembly and Finishing each draw six resource traces.
+    assert (
+        page.evaluate(
+            "document.getElementById('resources').data.map(trace => trace.visible)"
+        )
+        == [False] * 6 + [True] * 6
     )
     page.fill("#customer-choice", str(paused[0]["customer_id"]))
     page.click("#show-customer")

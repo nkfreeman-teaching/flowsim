@@ -216,7 +216,7 @@ tolerance of 1e-12.
 | 4.8 | Drop the redundant limit clause in the source loop | `engine.py:129-139` | Sonnet | done (6d905bc) |
 | 4.9 | Compute station state in one pass, and count outside tickets with a counter | `station.py:193-204` | Opus, Codex | done (3e81927) |
 | 4.10 | Compute time-weighted station areas in polars and split the count metrics out | `results.py:246-354` | Opus, Sonnet | done (060c358) |
-| 4.11 | Expand calls to the keyword layout rule in touched files | all touched files | Codex | done |
+| 4.11 | Expand calls to the keyword layout rule in touched files | all touched files | Codex | done (18cd1be) |
 
 Notes. For 4.1, a polars frame silently nulls a misspelled key (Opus checked: a row with `exit_tme`
 gave `exit_time == [None]` with no error), so the dataclasses and a field-equals-schema test close
@@ -246,7 +246,7 @@ have 24 calls outside the rule.
 
 | # | Change | Where | Found by | Status |
 |---|---|---|---|---|
-| 5.1 | Select viewer traces by station metadata instead of fixed counts | `plots.py:126-303`, `viewer.html:214-221` | All three | open |
+| 5.1 | Select viewer traces by station metadata instead of fixed counts | `plots.py:126-303`, `viewer.html:214-221` | All three | done |
 | 5.2 | Build each customer timeline once, in Python | `plots.py:306-375`, `viewer.html:223-275` | Opus, Sonnet | open |
 | 5.3 | Move the comparison page to a template file | `comparison.py:276-335` | Sonnet | open |
 | 5.4 | Fix README and message drift | README, `model.py:24`, `:259`, `:301` | Opus, Sonnet | open |

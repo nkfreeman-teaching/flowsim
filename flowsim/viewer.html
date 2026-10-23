@@ -202,8 +202,8 @@
     ]);
   }
   const stationChoice = document.getElementById("station-choice");
-  result.stations.forEach((row, index) => {
-    const option = document.createElement("option"); option.value = index; option.textContent = row.station; stationChoice.append(option);
+  result.stations.forEach(row => {
+    const option = document.createElement("option"); option.value = row.station; option.textContent = row.station; stationChoice.append(option);
   });
   const plotsReady = Promise.all(Object.entries(result.figures).map(([id, figure]) => {
     delete figure.layout.width; figure.layout.autosize = true;
@@ -213,12 +213,11 @@
   }));
   stationChoice.addEventListener("change", async () => {
     await plotsReady;
-    const index = Number(stationChoice.value);
-    Plotly.restyle("queues", {visible: result.figures.queues.data.map((_, i) => Math.floor(i / 2) === index)});
-    Plotly.restyle("waits", {visible: result.figures.waits.data.map((_, i) => i === index)});
-    if (result.figures.resources) {
-      Plotly.restyle("resources", {visible: result.figures.resources.data.map((_, i) => Math.floor(i / 6) === index)});
-    }
+    // Each station trace carries its station name as meta, as in plots.station_menu.
+    const station = stationChoice.value;
+    ["queues", "waits", "resources"].filter(id => result.figures[id]).forEach(id => {
+      Plotly.restyle(id, {visible: result.figures[id].data.map(trace => trace.meta === station)});
+    });
   });
   function showCustomer() {
     const id = Number(document.getElementById("customer-choice").value);
