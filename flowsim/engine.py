@@ -16,11 +16,12 @@ if TYPE_CHECKING:
     from flowsim.results import Results
 
 # The scheduler processes events at equal times by priority, then in the order
-# they were queued. Shift changes, completions, transfers, failures, and repairs
-# use the scheduler's NORMAL priority (1). Arrivals wait until those events
-# settle, and drain checks run last, after every other event at the same time.
-ARRIVAL_PRIORITY = 2
-SETTLED_PRIORITY = 3
+# they were queued. Shift changes come first (the scheduler's SHIFT_PRIORITY, 1).
+# Completions, transfers, failures, and repairs use NORMAL (2) and run in the
+# order they were scheduled. Arrivals wait until those events settle, and drain
+# checks run last, after every other event at the same time.
+ARRIVAL_PRIORITY = 3
+SETTLED_PRIORITY = 4
 
 
 class _Run:

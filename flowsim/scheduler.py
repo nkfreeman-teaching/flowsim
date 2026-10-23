@@ -16,9 +16,11 @@ from heapq import heappop, heappush
 from itertools import count
 
 # Process starts and the stop of run(until=time) come before every other event
-# at the same time. Succeeded events and timeouts default to NORMAL.
+# at the same time. FlowSim's shift changes come next, and succeeded events and
+# timeouts default to NORMAL.
 URGENT = 0
-NORMAL = 1
+SHIFT_PRIORITY = 1
+NORMAL = 2
 
 
 class Event:

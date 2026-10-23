@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from flowsim.model import Node, sample
-from flowsim.scheduler import Event
+from flowsim.scheduler import SHIFT_PRIORITY, Event
 
 if TYPE_CHECKING:
     from flowsim.engine import _Run
@@ -189,10 +189,12 @@ class _Station:
             for index in range(node.capacity)
         ]
         if node.staffing is not None:
-            # Queue every shift boundary before customer timeouts, giving shift
-            # changes precedence over arrivals and completions at equal times.
+            # Shift changes precede completions and arrivals at equal times.
             events = [
-                (run.scheduler.timeout(time), int(level))
+                (
+                    run.scheduler.timeout(time, priority=SHIFT_PRIORITY),
+                    int(level),
+                )
                 for time, level in node.staffing[1:]
             ]
             run.scheduler.process(self.shifts(events))

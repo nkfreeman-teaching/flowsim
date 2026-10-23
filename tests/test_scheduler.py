@@ -2,7 +2,7 @@
 
 import pytest
 
-from flowsim.scheduler import Scheduler
+from flowsim.scheduler import NORMAL, SHIFT_PRIORITY, Scheduler
 from tests.models import breaks_after_first_repair
 
 
@@ -13,8 +13,8 @@ def logger(log: list, label: str):
 def test_equal_times_run_by_priority_then_queue_order():
     scheduler = Scheduler()
     log = []
-    late = scheduler.timeout(0, priority=2)
-    late.callbacks.append(logger(log, "priority 2"))
+    late = scheduler.timeout(0, priority=NORMAL + 1)
+    late.callbacks.append(logger(log, "after NORMAL"))
     first, second = scheduler.event(), scheduler.event()
     first.callbacks.append(logger(log, "created first"))
     second.callbacks.append(logger(log, "created second"))
@@ -25,8 +25,19 @@ def test_equal_times_run_by_priority_then_queue_order():
     assert log == [
         ("created second", 0),
         ("created first", 0),
-        ("priority 2", 0),
+        ("after NORMAL", 0),
     ]
+
+
+def test_shift_priority_precedes_normal_events_queued_earlier():
+    scheduler = Scheduler()
+    log = []
+    completion = scheduler.timeout(1)
+    completion.callbacks.append(logger(log, "completion"))
+    shift = scheduler.timeout(1, priority=SHIFT_PRIORITY)
+    shift.callbacks.append(logger(log, "shift change"))
+    scheduler.run(until=2)
+    assert log == [("shift change", 1), ("completion", 1)]
 
 
 def test_process_start_precedes_queued_events_at_the_same_time():

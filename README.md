@@ -336,8 +336,8 @@ before closing). The state trace includes the continuation, and the viewer marks
 closing with a dashed line.
 
 Several events can occur at the same instant. FlowSim processes shift changes
-first, then service completions, transfers, failures, and repairs, and new
-arrivals last. Thus, a server that finishes a job at minute 10 is free for a
+first, then service completions, transfers, failures, and repairs in the order
+they were scheduled, then new arrivals, and drain checks last. Thus, a server that finishes a job at minute 10 is free for a
 customer who arrives at minute 10, and the state trace keeps the final state at
 each time.
 

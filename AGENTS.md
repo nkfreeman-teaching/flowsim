@@ -13,8 +13,9 @@ Keep the event scheduler in `flowsim/scheduler.py`, simulation processes in
 - Every station runs through `_Station` in `flowsim/station.py`. Do not add a
   second customer path for plain stations.
 - At equal times, shift changes run first, then completions, transfers,
-  failures, and repairs, then arrivals, then drain checks. `flowsim/engine.py`
-  sets this order with scheduler event priorities.
+  failures, and repairs in the order they were scheduled, then arrivals, then
+  drain checks. `flowsim/engine.py` sets this order with scheduler event
+  priorities.
 - Verify timing and metrics with hand-calculated examples, not only simulator
   output.
 - Routes remain acyclic, and service remains first-come, first-served.
