@@ -116,8 +116,8 @@ so 12 cases pass on the wrong error. Add the expected message fragment to each c
 | 2.2 | List stations in model definition order | `flowsim/engine.py:62-72` | Sonnet | Row order | done (2366073) |
 | 2.3 | Rename `in_service_*` to `occupied_*` and relabel plots | `results.py:299-301`, `plots.py:132`, `viewer.html`, README | Opus, Sonnet | Column names | done (0fe64fb) |
 | 2.4 | Add `measurement_rejected` and `measurement_admitted` | `results.py:356-424`, `METRICS`, README | Opus | New columns | done (92bcce3) |
-| 2.5 | Add two station columns missing from `METRICS` | `results.py:89-119`, README | Opus | Accepts two metrics | done |
-| 2.6 | Remove the unused paused-area accumulator | `results.py:253-276` | Codex | None | open |
+| 2.5 | Add two station columns missing from `METRICS` | `results.py:89-119`, README | Opus | Accepts two metrics | done (99809a9) |
+| 2.6 | Remove the unused paused-area accumulator | `results.py:253-276` | Codex | None | done |
 | 2.7 | Give empty interval tables their columns | `results.py:149-158` | Sonnet | Empty frame gains columns | open |
 | 2.8 | Store staffing levels as integers | `schedules.py:45`, `station.py:159`, `:177` | Opus | `metadata.json` levels | open |
 | 2.9 | Pin seeded outputs with a tripwire test | `tests/` | Opus, Sonnet | None | open |

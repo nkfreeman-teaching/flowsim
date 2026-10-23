@@ -265,7 +265,6 @@ class Results:
                 for field in [
                     "processing",
                     "blocked",
-                    "paused",
                     "down",
                     "scheduled",
                     "available",
