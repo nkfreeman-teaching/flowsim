@@ -30,7 +30,7 @@ version = { attr = "flowsim.__version__" }
 include = ["flowsim*"]
 
 [tool.setuptools.package-data]
-flowsim = ["comparison.html", "viewer.html"]
+flowsim = ["comparison.html", "supply.html", "viewer.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

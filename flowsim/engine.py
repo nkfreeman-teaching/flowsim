@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import math
 import zlib
-from dataclasses import dataclass, fields, replace
+from collections import deque
+from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from flowsim.results import (
+    SUPPLIER,
     Results,
     Status,
     _Activity,
     _Customer,
     _Failure,
+    _Inventory,
+    _Shipment,
     _State,
     _Visit,
 )
@@ -28,10 +33,12 @@ if TYPE_CHECKING:
 # The scheduler processes events at equal times by priority, then in the order
 # they were queued. Shift changes come first (the scheduler's SHIFT_PRIORITY, 1).
 # Completions, transfers, failures, and repairs use NORMAL (2) and run in the
-# order they were scheduled. Arrivals wait until those events settle, and drain
-# checks run last, after every other event at the same time.
+# order they were scheduled. Arrivals wait until those events settle. Stock-point
+# reviews come after arrivals, and drain checks run last, after every other
+# event at the same time.
 ARRIVAL_PRIORITY = 3
-SETTLED_PRIORITY = 4
+REVIEW_PRIORITY = 4
+SETTLED_PRIORITY = 5
 
 # Each node's seeds use its name's CRC-32 and one of these purposes as the spawn
 # key. Server failure and repair seeds are spawned from the SERVER_STREAMS seed.
@@ -66,6 +73,24 @@ class _Route:
     probabilities: np.ndarray | None
 
 
+@dataclass(slots=True)
+class _Stock:
+    """A stock point's running state during one run.
+
+    The pipeline holds shipments on the way as (receipt period, record) pairs in
+    sending order, so receipts come off its front.
+    """
+
+    node: Node
+    cover: float
+    rng: np.random.Generator
+    on_hand: float
+    backorders: float = 0.0
+    on_order: float = 0.0
+    history: list[float] = field(default_factory=list)
+    pipeline: deque[tuple[int, _Shipment]] = field(default_factory=deque)
+
+
 class _Same:
     """Compare a sampling function by identity inside a definition key."""
 
@@ -98,6 +123,8 @@ class _Run:
         self.histories: dict[str, list[_State]] = {}
         self.activities: list[_Activity] = []
         self.failures: list[_Failure] = []
+        self.inventory: list[_Inventory] = []
+        self.shipments: list[_Shipment] = []
         self.closed = False
         self.active_customers = 0
         self.finished = self.scheduler.event()
@@ -132,7 +159,7 @@ class _Run:
             )
         # Routes are fixed for the run, so each node's choices are built once.
         self.routes: dict[str, _Route] = {}
-        for name in names:
+        for name in graph.nodes:
             destinations = list(graph.successors(name))
             if not destinations:
                 continue
@@ -162,6 +189,23 @@ class _Run:
                     seed=node_seed(name, SERVER_STREAMS),
                 )
                 self.observe(name)
+        chain = model.supply_chain
+        # The chain runs from the retailer, nearest demand, up to the top stage.
+        # A constant lead time is a whole number of periods, which Model.supply
+        # checks, so rounding removes floating-point remainders from its cover.
+        self.stocks = [
+            _Stock(
+                node=node,
+                cover=(
+                    round(node.lead_time / chain.period)
+                    if node.policy.cover is None
+                    else node.policy.cover
+                ),
+                rng=self.streams[node.name].durations,
+                on_hand=node.initial,
+            )
+            for node in ([] if chain is None else chain.stock_points)
+        ]
 
     def settled(self) -> Event:
         """Wake after every other event at the current time."""
@@ -197,7 +241,17 @@ class _Run:
             (origin, target, data["probability"])
             for origin, target, data in self.model.graph.edges(data=True)
         )
-        return (self.model.time_unit, nodes, routes)
+        chain = self.model.supply_chain
+        supply = (
+            None
+            if chain is None
+            else (
+                chain.demand.name,
+                tuple(node.name for node in chain.stock_points),
+                chain.period,
+            )
+        )
+        return (self.model.time_unit, nodes, routes, supply)
 
     def next_node(self, name: str) -> Node:
         route = self.routes[name]
@@ -298,10 +352,163 @@ class _Run:
         if self.closed and self.active_customers == 0 and not self.finished.triggered:
             self.finished.succeed()
 
+    def supply(self):
+        """Review every stock point once per period, from the retailer upward."""
+        chain = self.model.supply_chain
+        period = 0
+        while period * chain.period < self.duration:
+            yield self.scheduler.timeout(
+                period * chain.period - self.scheduler.now,
+                priority=REVIEW_PRIORITY,
+            )
+            self.review(period)
+            period += 1
+
+    def review(self, period: int) -> None:
+        """Run one period's receipts, fills, and orders at every stage.
+
+        Each stage fills the order its downstream stage placed in this period,
+        so a stage's incoming orders are the retailer's consumer demand or the
+        order quantity just set below it.
+        """
+        chain = self.model.supply_chain
+        time = period * chain.period
+        consumers = sample(
+            distribution=chain.demand.per_period,
+            rng=self.streams[chain.demand.name].durations,
+            label=f"Demand at {chain.demand.name!r}",
+        )
+        incoming = consumers
+        for index, stock in enumerate(self.stocks):
+            downstream = self.stocks[index - 1] if index else None
+            received = 0.0
+            while stock.pipeline and stock.pipeline[0][0] <= period:
+                _, shipment = stock.pipeline.popleft()
+                shipment.arrival_time = time
+                received += shipment.quantity
+            stock.on_hand += received
+            stock.on_order -= received
+            # Backorders are older than this period's orders, so they ship first.
+            late = min(stock.on_hand, stock.backorders)
+            filled = min(stock.on_hand - late, incoming)
+            stock.on_hand -= late + filled
+            stock.backorders -= late
+            lost = 0.0
+            if stock.node.shortage == "backorder":
+                stock.backorders += incoming - filled
+            else:
+                lost = incoming - filled
+                # The downstream stage will never receive a lost order.
+                if downstream is not None:
+                    downstream.on_order -= lost
+            if downstream is not None and late + filled > 0:
+                self.ship(
+                    sender=stock.node.name,
+                    receiver=downstream,
+                    quantity=late + filled,
+                    period=period,
+                )
+            stock.history.append(
+                consumers if stock.node.forecast_from == "end_demand" else incoming
+            )
+            forecast, target = stock.node.policy.target(stock.history, stock.cover)
+            position = stock.on_hand + stock.on_order - stock.backorders
+            order = max(0.0, target - position)
+            stock.on_order += order
+            self.inventory.append(
+                _Inventory(
+                    stock_point=stock.node.name,
+                    period=period,
+                    time=time,
+                    received=received,
+                    demand=incoming,
+                    filled=filled,
+                    shipped=late + filled,
+                    lost=lost,
+                    on_hand=stock.on_hand,
+                    backorders=stock.backorders,
+                    on_order=stock.on_order,
+                    position=position + order,
+                    forecast=forecast,
+                    target=target,
+                    order_quantity=order,
+                )
+            )
+            incoming = order
+        if incoming > 0:
+            self.ship(
+                sender=SUPPLIER,
+                receiver=self.stocks[-1],
+                quantity=incoming,
+                period=period,
+            )
+
+    def ship(self, sender: str, receiver: _Stock, quantity: float, period: int) -> None:
+        """Send a shipment that the receiver adds to stock at a later review.
+
+        A shipment arrives at the first review at or after its lead time, at
+        least one period later, and never before an earlier shipment to the same
+        receiver.
+        """
+        node = receiver.node
+        length = self.model.supply_chain.period
+        if callable(node.lead_time):
+            lead_time = sample(
+                distribution=node.lead_time,
+                rng=receiver.rng,
+                label=f"Lead time at {node.name!r}",
+                positive=True,
+            )
+            # The tolerance keeps a lead time of exactly k periods, computed in
+            # floating point, from rounding up to k + 1.
+            periods = max(1, math.ceil(lead_time / length - 1e-9))
+        else:
+            lead_time = node.lead_time
+            periods = round(lead_time / length)
+        due = period + periods
+        if receiver.pipeline:
+            due = max(due, receiver.pipeline[-1][0])
+        shipment = _Shipment(
+            sender=sender,
+            receiver=node.name,
+            quantity=quantity,
+            ship_time=period * length,
+            lead_time=lead_time,
+        )
+        self.shipments.append(shipment)
+        receiver.pipeline.append((due, shipment))
+
+    def supply_settings(self) -> dict | None:
+        chain = self.model.supply_chain
+        if chain is None:
+            return None
+        return {
+            "chain": [chain.demand.name, *[node.name for node in chain.stock_points]],
+            "period": chain.period,
+            "stock_points": {
+                stock.node.name: {
+                    "initial": stock.node.initial,
+                    "lead_time": (
+                        "sampled"
+                        if callable(stock.node.lead_time)
+                        else stock.node.lead_time
+                    ),
+                    "cover": stock.cover,
+                    "shortage": stock.node.shortage,
+                    "forecast_from": stock.node.forecast_from,
+                    "window": stock.node.policy.forecast.window,
+                    "safety_factor": stock.node.policy.safety_factor,
+                }
+                for stock in self.stocks
+            },
+        }
+
     def execute(self) -> Results:
         for node in self.model.nodes.values():
             if node.kind == "source":
                 self.scheduler.process(self.source(node))
+        if self.stocks:
+            self.scheduler.process(self.supply())
         self.scheduler.run(until=self.duration)
         self.closed = True
         closing_states = {}
@@ -329,6 +536,9 @@ class _Run:
             states=states,
             activities=activities,
             failures=self.failures,
+            inventory=self.inventory,
+            shipments=self.shipments,
+            supply=self.supply_settings(),
             definitions={
                 name: {
                     "arrival_rates": node.arrival_rates,
@@ -340,6 +550,7 @@ class _Run:
                     "failures_enabled": node.time_to_failure is not None,
                 }
                 for name, node in self.model.nodes.items()
+                if node.kind in {"source", "station", "exit"}
             },
             capacities={
                 name: station.node.capacity for name, station in self.stations.items()

@@ -103,6 +103,48 @@ STATION_SCHEMA = {
     "mean_outside_queue": pl.Float64,
     "staffed_utilization": pl.Float64,
 }
+# One row per stock point and review period. Stock columns are end-of-period
+# values after the review's order, and flow columns are totals for the period.
+INVENTORY_SCHEMA = {
+    "stock_point": pl.String,
+    "period": pl.Int64,
+    "time": pl.Float64,
+    "received": pl.Float64,
+    "demand": pl.Float64,
+    "filled": pl.Float64,
+    "shipped": pl.Float64,
+    "lost": pl.Float64,
+    "on_hand": pl.Float64,
+    "backorders": pl.Float64,
+    "on_order": pl.Float64,
+    "position": pl.Float64,
+    "forecast": pl.Float64,
+    "target": pl.Float64,
+    "order_quantity": pl.Float64,
+}
+SHIPMENT_SCHEMA = {
+    "sender": pl.String,
+    "receiver": pl.String,
+    "quantity": pl.Float64,
+    "ship_time": pl.Float64,
+    "lead_time": pl.Float64,
+    "arrival_time": pl.Float64,
+}
+STOCK_POINT_SCHEMA = {
+    "stock_point": pl.String,
+    "periods": pl.Int64,
+    "mean_demand": pl.Float64,
+    "mean_order": pl.Float64,
+    "demand_variance": pl.Float64,
+    "order_variance": pl.Float64,
+    "bullwhip_ratio": pl.Float64,
+    "fill_rate": pl.Float64,
+    "mean_on_hand": pl.Float64,
+    "mean_backorders": pl.Float64,
+    "lost_units": pl.Float64,
+}
+# The top supplier's name in the shipments table. It has unlimited stock.
+SUPPLIER = "Supplier"
 # State counts integrated over time for the station table.
 AREA_FIELDS = [
     "waiting",
@@ -222,6 +264,41 @@ class _Failure:
     repair_end: float | None = None
 
 
+@dataclass(
+    slots=True,
+    kw_only=True,
+)
+class _Inventory:
+    stock_point: str
+    period: int
+    time: float
+    received: float
+    demand: float
+    filled: float
+    shipped: float
+    lost: float
+    on_hand: float
+    backorders: float
+    on_order: float
+    position: float
+    forecast: float
+    target: float
+    order_quantity: float
+
+
+@dataclass(
+    slots=True,
+    kw_only=True,
+)
+class _Shipment:
+    sender: str
+    receiver: str
+    quantity: float
+    ship_time: float
+    lead_time: float
+    arrival_time: float | None = None
+
+
 def _frame(records: list, schema: dict[str, pl.DataType]) -> pl.DataFrame:
     """Build a table from records, reading each column by its field name.
 
@@ -241,7 +318,7 @@ class Metric:
     """A replication metric: its table, its display label, and its kind.
 
     The kind sets units and number formats: "time", "rate", "fraction",
-    "servers", or "customers".
+    "servers", "customers", "units", or "ratio".
     """
 
     scope: str
@@ -375,10 +452,38 @@ METRICS = {
         label="Time-average customers waiting outside",
         kind="customers",
     ),
+    "bullwhip_ratio": Metric(
+        scope="stock_point",
+        label="Order variance / demand variance",
+        kind="ratio",
+    ),
+    "fill_rate": Metric(
+        scope="stock_point",
+        label="Demand filled from stock in the same period",
+        kind="fraction",
+    ),
+    "mean_on_hand": Metric(
+        scope="stock_point",
+        label="Mean end-of-period stock on hand",
+        kind="units",
+    ),
+    "mean_backorders": Metric(
+        scope="stock_point",
+        label="Mean end-of-period backorders",
+        kind="units",
+    ),
+    "lost_units": Metric(
+        scope="stock_point",
+        label="Lost sales",
+        kind="units",
+    ),
 }
 SYSTEM_METRICS = [name for name, metric in METRICS.items() if metric.scope == "system"]
 STATION_METRICS = [
     name for name, metric in METRICS.items() if metric.scope == "station"
+]
+STOCK_POINT_METRICS = [
+    name for name, metric in METRICS.items() if metric.scope == "stock_point"
 ]
 
 
@@ -389,6 +494,8 @@ def metric_units(metric: str, time_unit: str) -> str:
         "fraction": "share of capacity",
         "servers": "servers",
         "customers": "customers",
+        "units": "units",
+        "ratio": "variance ratio",
     }[METRICS[metric].kind]
 
 
@@ -407,6 +514,7 @@ INTERVAL_SCHEMA = {
     "scenario": pl.String,
     "baseline": pl.String,
     "station": pl.String,
+    "stock_point": pl.String,
     "metric": pl.String,
     "runs": pl.Int64,
     "observed_runs": pl.Int64,
@@ -481,6 +589,9 @@ class Results:
         states: list[_State],
         activities: list[_Activity],
         failures: list[_Failure],
+        inventory: list[_Inventory],
+        shipments: list[_Shipment],
+        supply: dict | None,
         definitions: dict,
         capacities: dict[str, int],
         duration: float,
@@ -498,6 +609,11 @@ class Results:
         self.states = _frame(states, STATE_SCHEMA)
         self.activities = _frame(activities, ACTIVITY_SCHEMA)
         self.failures = _frame(failures, FAILURE_SCHEMA)
+        self.inventory = _frame(inventory, INVENTORY_SCHEMA)
+        self.shipments = _frame(shipments, SHIPMENT_SCHEMA)
+        # The chain's order, review period, and stock-point settings, or None
+        # for a service network.
+        self.supply = supply
         self.definitions = definitions
         self.capacities = capacities.copy()
         self.duration = duration
@@ -512,6 +628,7 @@ class Results:
         self._definition = definition
         self.stations = self._station_metrics()
         self.summary = self._system_metrics()
+        self.stock_points = self._stock_point_metrics()
 
     def _station_areas(self) -> pl.DataFrame:
         """Integrate each station's state counts over [warmup, duration).
@@ -738,6 +855,57 @@ class Results:
             },
         )
 
+    def _stock_point_metrics(self) -> pl.DataFrame:
+        """Summarize each stock point over the review periods in [warmup, duration).
+
+        Means of on-hand stock and backorders average end-of-period values. The
+        fill rate is the share of each period's new demand filled from stock in
+        that period. The bullwhip ratio divides the variance of orders placed by
+        the variance of orders received, both with the n - 1 divisor, and is
+        missing with fewer than two periods or constant demand.
+        """
+        names = [] if self.supply is None else self.supply["chain"][1:]
+        window = self.inventory.filter(pl.col("time") >= self.warmup)
+        measured = window.group_by("stock_point").agg(
+            pl.len().alias("periods"),
+            pl.col("demand").mean().alias("mean_demand"),
+            pl.col("order_quantity").mean().alias("mean_order"),
+            pl.col("demand").var(ddof=1).alias("demand_variance"),
+            pl.col("order_quantity").var(ddof=1).alias("order_variance"),
+            pl.col("demand").sum().alias("demanded"),
+            pl.col("filled").sum().alias("filled"),
+            pl.col("on_hand").mean().alias("mean_on_hand"),
+            pl.col("backorders").mean().alias("mean_backorders"),
+            pl.col("lost").sum().alias("lost_units"),
+        )
+        return (
+            pl.DataFrame(
+                data={"stock_point": names},
+                schema={"stock_point": pl.String},
+            )
+            .join(
+                other=measured,
+                on="stock_point",
+                how="left",
+                maintain_order="left",
+            )
+            .with_columns(
+                pl.when(pl.col("demand_variance") > 0)
+                .then(pl.col("order_variance") / pl.col("demand_variance"))
+                .alias("bullwhip_ratio"),
+                pl.when(pl.col("demanded") > 0)
+                .then(pl.col("filled") / pl.col("demanded"))
+                .alias("fill_rate"),
+                pl.col("periods").fill_null(0),
+            )
+            .select(
+                [
+                    pl.col(column).cast(dtype)
+                    for column, dtype in STOCK_POINT_SCHEMA.items()
+                ]
+            )
+        )
+
     # plots imports METRICS from this module at load time, so each plot
     # method imports its function when called.
     def queue_plot(self) -> Figure:
@@ -765,11 +933,21 @@ class Results:
 
         return customer_plot(self, customer_id)
 
+    def inventory_plot(self) -> Figure:
+        from flowsim.plots import inventory_plot
+
+        return inventory_plot(self)
+
+    def orders_plot(self) -> Figure:
+        from flowsim.plots import orders_plot
+
+        return orders_plot(self)
+
     def viewer(self, path: str | Path | None = None) -> str:
         """Return an offline HTML viewer, optionally saving it to a file."""
-        from flowsim.plots import viewer_html
+        from flowsim.plots import supply_viewer_html, viewer_html
 
-        html = viewer_html(self)
+        html = viewer_html(self) if self.supply is None else supply_viewer_html(self)
         if path is not None:
             write_text(path, html)
         return html
@@ -791,6 +969,9 @@ class Results:
             "failures",
         ]:
             getattr(self, name).write_csv(destination / f"{name}.csv")
+        if self.supply is not None:
+            for name in ["inventory", "shipments", "stock_points"]:
+                getattr(self, name).write_csv(destination / f"{name}.csv")
         metadata = {
             "time_unit": self.time_unit,
             "duration": self.duration,
@@ -812,6 +993,14 @@ class Results:
             "flow_cohort": "System arrivals at or after warmup with observed exits",
             "censoring": "Missing starts and exits remain null, never zero",
         }
+        if self.supply is not None:
+            metadata["supply"] = self.supply
+            metadata["inventory_window"] = (
+                "Review periods at times in [warmup, duration)"
+            )
+            metadata["shipment_arrivals"] = (
+                "Null for shipments still in transit at the end"
+            )
         _write_metadata(destination / "metadata.json", metadata)
         return destination
 
@@ -857,6 +1046,18 @@ class Experiment:
         )
 
     @property
+    def stock_points(self) -> pl.DataFrame:
+        return pl.concat(
+            [
+                run.stock_points.select(
+                    pl.lit(index).alias("replication"),
+                    pl.all(),
+                )
+                for index, run in enumerate(self.runs, start=1)
+            ]
+        )
+
+    @property
     def summary(self) -> pl.DataFrame:
         return pl.concat(
             [
@@ -868,9 +1069,24 @@ class Experiment:
             ]
         )
 
-    def _values(self, metric: str, station: str | None) -> np.ndarray:
+    def stock_point_names(self) -> list[str]:
+        supply = self.runs[0].supply
+        return [] if supply is None else supply["chain"][1:]
+
+    def _values(
+        self,
+        metric: str,
+        station: str | None,
+        stock_point: str | None = None,
+    ) -> np.ndarray:
         """Return one value per replication, in replication order."""
-        if station is None:
+        if stock_point is not None:
+            if stock_point not in self.stock_point_names():
+                raise ValueError(
+                    f"Stock point {stock_point!r} is missing in this experiment."
+                )
+            table = self.stock_points.filter(pl.col("stock_point") == stock_point)
+        elif station is None:
             table = self.summary
         else:
             if station not in self.runs[0].capacities:
@@ -887,17 +1103,47 @@ class Experiment:
         metric: str = "mean_wait",
         *,
         station: str | None = None,
+        stock_point: str | None = None,
         confidence: float = 0.95,
     ) -> pl.DataFrame:
         """Estimate a metric across runs, reporting missing estimates.
 
         A station metric gives one row per station unless a station is named.
-        A system metric gives one row with a null station.
+        A system metric gives one row with a null station. A stock-point metric
+        gives one row per stock point unless one is named, in a stock_point
+        column that replaces the station column.
         """
         level = confidence_level(confidence)
         if metric not in METRICS:
             raise ValueError(f"Choose a metric from {list(METRICS)}.")
-        if METRICS[metric].scope == "system":
+        scope = METRICS[metric].scope
+        if stock_point is not None and scope != "stock_point":
+            raise ValueError(f"{metric!r} is not a stock-point metric.")
+        if scope == "stock_point":
+            if station is not None:
+                raise ValueError(f"{metric!r} is a stock-point metric with no station.")
+            names = self.stock_point_names() if stock_point is None else [stock_point]
+            return interval_frame(
+                rows=[
+                    {
+                        "stock_point": name,
+                        "metric": metric,
+                        "runs": len(self.runs),
+                        **interval_estimate(
+                            self._values(
+                                metric=metric,
+                                station=None,
+                                stock_point=name,
+                            ),
+                            level,
+                        ),
+                        "confidence": level,
+                    }
+                    for name in names
+                ],
+                keys=["stock_point", "metric"],
+            )
+        if scope == "system":
             if station is not None:
                 raise ValueError(f"{metric!r} is a system metric with no station.")
             names = [None]

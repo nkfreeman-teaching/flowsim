@@ -6,7 +6,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from examples import extensions, models, operations
+from examples import extensions, models, operations, supply_chain
 from examples.service_day import (
     ON_TIME_SHARE,
     OVERTIME_LIMIT,
@@ -116,3 +116,35 @@ def test_cross_dock_holds_trucks_at_the_gate_when_the_yard_is_full():
         .to_list()
     )
     assert finals == ["Outbound load", "Put-away"]
+
+
+def test_beer_game_example_keeps_its_stages_and_rules():
+    result = supply_chain.beer_game().run(
+        duration=supply_chain.WEEKS,
+        seed=2,
+        warmup=supply_chain.WARMUP,
+    )
+    assert result.supply["chain"] == ["Consumers", *supply_chain.STAGES]
+    assert result.stock_points.get_column("periods").to_list() == [84] * 4
+    # Each stage starts with two weeks of mean demand, 200 cases.
+    first = result.inventory.filter(pl.col("period") == 0)
+    assert first.get_column("on_hand").to_list()[0] == pytest.approx(
+        200 - first.get_column("demand").to_list()[0]
+    )
+    shipments = result.shipments.drop_nulls("arrival_time")
+    lead_times = (
+        shipments.get_column("arrival_time") - shipments.get_column("ship_time")
+    ).unique()
+    assert lead_times.to_list() == [2.0]
+
+
+def test_bullwhip_study_compounds_without_sharing():
+    comparison = supply_chain.bullwhip_study(replications=3)
+    table = supply_chain.amplification(comparison)
+    rows = {row["scenario"]: row for row in table.to_dicts()}
+    private = [rows["Forecast from orders"][stage] for stage in supply_chain.STAGES]
+    shared = [rows["Share consumer demand"][stage] for stage in supply_chain.STAGES]
+    assert private == sorted(private)
+    # The retailer sees consumer demand either way, so only upstream changes.
+    assert shared[0] == pytest.approx(private[0])
+    assert shared[-1] < private[-1]

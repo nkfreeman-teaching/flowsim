@@ -16,6 +16,7 @@ from flowsim.plots import BLUE, label, style
 from flowsim.results import (
     METRICS,
     STATION_METRICS,
+    STOCK_POINT_METRICS,
     SYSTEM_METRICS,
     Experiment,
     _run_settings,
@@ -68,8 +69,34 @@ class Comparison:
             ]
         )
 
-    def _values(self, scenario: str, metric: str, station: str | None) -> np.ndarray:
-        if station is None and metric not in SYSTEM_METRICS:
+    @property
+    def stock_points(self) -> pl.DataFrame:
+        return pl.concat(
+            [
+                experiment.stock_points.select(pl.lit(name).alias("scenario"), pl.all())
+                for name, experiment in self.experiments.items()
+            ]
+        )
+
+    def _values(
+        self,
+        scenario: str,
+        metric: str,
+        station: str | None,
+        stock_point: str | None = None,
+    ) -> np.ndarray:
+        if stock_point is not None:
+            if metric not in STOCK_POINT_METRICS:
+                raise ValueError(
+                    f"Choose a stock-point metric from {STOCK_POINT_METRICS}."
+                )
+            if station is not None:
+                raise ValueError("Name a station or a stock point, not both.")
+        elif metric in STOCK_POINT_METRICS:
+            raise ValueError(
+                f"{metric!r} is a stock-point metric, so name a stock point."
+            )
+        elif station is None and metric not in SYSTEM_METRICS:
             raise ValueError(
                 f"Choose a system metric from {SYSTEM_METRICS}, "
                 "or name a station for a station metric."
@@ -77,7 +104,11 @@ class Comparison:
         if station is not None and metric not in STATION_METRICS:
             raise ValueError(f"Choose a station metric from {STATION_METRICS}.")
         try:
-            return self.experiments[scenario]._values(metric, station)
+            return self.experiments[scenario]._values(
+                metric=metric,
+                station=station,
+                stock_point=stock_point,
+            )
         except ValueError as error:
             raise ValueError(f"Scenario {scenario!r}: {error}") from None
 
@@ -92,6 +123,7 @@ class Comparison:
         metric: str = "mean_total_wait",
         *,
         station: str | None = None,
+        stock_point: str | None = None,
         confidence: float = 0.95,
     ) -> pl.DataFrame:
         level = confidence_level(confidence)
@@ -101,12 +133,13 @@ class Comparison:
                 scenario=name,
                 metric=metric,
                 station=station,
+                stock_point=stock_point,
             )
             rows.append(
                 {
                     "scenario": name,
                     "metric": metric,
-                    "station": station,
+                    **_location(station, stock_point),
                     "runs": len(experiment.runs),
                     **interval_estimate(values, level),
                     "confidence": level,
@@ -114,7 +147,7 @@ class Comparison:
             )
         return interval_frame(
             rows=rows,
-            keys=["scenario", "metric", "station"],
+            keys=["scenario", "metric", *_location(station, stock_point)],
         )
 
     def differences(
@@ -123,6 +156,7 @@ class Comparison:
         *,
         baseline: str | None = None,
         station: str | None = None,
+        stock_point: str | None = None,
         confidence: float = 0.95,
     ) -> pl.DataFrame:
         reference = self._reference(baseline)
@@ -131,6 +165,7 @@ class Comparison:
             scenario=reference,
             metric=metric,
             station=station,
+            stock_point=stock_point,
         )
         baseline_seeds = [run.seed for run in self.experiments[reference].runs]
         rows = []
@@ -141,6 +176,7 @@ class Comparison:
                 scenario=name,
                 metric=metric,
                 station=station,
+                stock_point=stock_point,
             )
             if [run.seed for run in experiment.runs] != baseline_seeds:
                 raise ValueError("Paired scenarios need identical replication seeds.")
@@ -151,7 +187,7 @@ class Comparison:
                     "scenario": name,
                     "baseline": reference,
                     "metric": metric,
-                    "station": station,
+                    **_location(station, stock_point),
                     "runs": len(experiment.runs),
                     **interval_estimate(values - baseline_values, level),
                     "confidence": level,
@@ -159,7 +195,7 @@ class Comparison:
             )
         return interval_frame(
             rows=rows,
-            keys=["scenario", "baseline", "metric", "station"],
+            keys=["scenario", "baseline", "metric", *_location(station, stock_point)],
         )
 
     def plot(
@@ -167,6 +203,7 @@ class Comparison:
         metric: str = "mean_total_wait",
         *,
         station: str | None = None,
+        stock_point: str | None = None,
         confidence: float = 0.95,
         differences: bool = False,
         baseline: str | None = None,
@@ -176,12 +213,14 @@ class Comparison:
                 metric=metric,
                 baseline=baseline,
                 station=station,
+                stock_point=stock_point,
                 confidence=confidence,
             )
             if differences
             else self.intervals(
                 metric=metric,
                 station=station,
+                stock_point=stock_point,
                 confidence=confidence,
             )
         )
@@ -244,6 +283,7 @@ class Comparison:
         *,
         metric: str = "mean_total_wait",
         station: str | None = None,
+        stock_point: str | None = None,
         confidence: float = 0.95,
         baseline: str | None = None,
     ) -> str:
@@ -251,11 +291,13 @@ class Comparison:
         means = self.plot(
             metric=metric,
             station=station,
+            stock_point=stock_point,
             confidence=confidence,
         )
         changes = self.plot(
             metric=metric,
             station=station,
+            stock_point=stock_point,
             confidence=confidence,
             differences=True,
             baseline=reference,
@@ -273,6 +315,7 @@ class Comparison:
         table = self.intervals(
             metric=metric,
             station=station,
+            stock_point=stock_point,
             confidence=confidence,
         )
         fraction = METRICS[metric].kind == "fraction"
@@ -295,18 +338,27 @@ class Comparison:
                 "<tr>" + "".join(f"<td>{value}</td>" for value in cells) + "</tr>"
             )
         title = METRICS[metric].label
+        if stock_point is not None:
+            title += f" at {stock_point}"
         units = html.escape(
             "percent" if fraction else metric_units(metric, self.time_unit)
         )
-        text = (
-            f"Operating hours end at {self.duration:g} {self.time_unit}. "
-            f"Measurement begins at {self.warmup:g} {self.time_unit}. "
-            + (
-                "Every admitted customer is served to completion."
-                if self.drain
-                else "Service stops at closing. Waiting and flow averages include observed outcomes."
+        if stock_point is not None:
+            text = (
+                f"Stock points review each period until {self.duration:g} "
+                f"{self.time_unit}. Measurement begins at {self.warmup:g} "
+                f"{self.time_unit}."
             )
-        )
+        else:
+            text = (
+                f"Operating hours end at {self.duration:g} {self.time_unit}. "
+                f"Measurement begins at {self.warmup:g} {self.time_unit}. "
+                + (
+                    "Every admitted customer is served to completion."
+                    if self.drain
+                    else "Service stops at closing. Waiting and flow averages include observed outcomes."
+                )
+            )
         values = {
             "TEXT": html.escape(text),
             "TITLE": html.escape(title),
@@ -337,6 +389,7 @@ class Comparison:
         *,
         metric: str = "mean_total_wait",
         station: str | None = None,
+        stock_point: str | None = None,
         confidence: float = 0.95,
         baseline: str | None = None,
     ) -> Path:
@@ -344,12 +397,14 @@ class Comparison:
         intervals = self.intervals(
             metric=metric,
             station=station,
+            stock_point=stock_point,
             confidence=confidence,
         )
         differences = self.differences(
             metric=metric,
             baseline=reference,
             station=station,
+            stock_point=stock_point,
             confidence=confidence,
         )
         destination = Path(directory)
@@ -359,12 +414,18 @@ class Comparison:
         )
         self.summary.write_csv(destination / "runs.csv")
         self.stations.write_csv(destination / "stations.csv")
+        if any(
+            experiment.runs[0].supply is not None
+            for experiment in self.experiments.values()
+        ):
+            self.stock_points.write_csv(destination / "stock_points.csv")
         intervals.write_csv(destination / "intervals.csv")
         differences.write_csv(destination / "differences.csv")
         metadata = {
             "baseline": reference,
             "metric": metric,
             "station": station,
+            **({} if stock_point is None else {"stock_point": stock_point}),
             "confidence": confidence,
             "time_unit": self.time_unit,
             "duration": self.duration,
@@ -375,6 +436,17 @@ class Comparison:
         }
         _write_metadata(destination / "metadata.json", metadata)
         return destination
+
+
+def _location(station: str | None, stock_point: str | None) -> dict:
+    """Return the interval table's location column, keyed by its name.
+
+    Stock-point metrics use a stock_point column, and every other metric keeps
+    the station column, which is null for system metrics.
+    """
+    if stock_point is not None:
+        return {"stock_point": stock_point}
+    return {"station": station}
 
 
 def compare(

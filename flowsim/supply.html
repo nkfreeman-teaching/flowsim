@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlowSim supply chain</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #172b3a; background: #f3f6f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 1200px; margin: auto; padding: 28px; }
+    h1 { margin: 0 0 8px; font-size: 30px; }
+    h2 { margin: 0 0 10px; font-size: 20px; }
+    p { line-height: 1.5; margin: 8px 0 16px; }
+    .muted { color: #536575; }
+    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 24px 0; }
+    .card, section { background: white; border: 1px solid #dce3e8; border-radius: 10px; padding: 20px; }
+    .card .value { display: block; font-size: 27px; font-weight: 650; margin-top: 7px; }
+    section { margin-bottom: 18px; min-width: 0; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; }
+    select, button { font: inherit; padding: 8px 11px; border: 1px solid #a9bac7; border-radius: 5px; background: white; color: #172b3a; }
+    button { cursor: pointer; }
+    button:hover { background: #edf3f7; }
+    label { font-size: 14px; }
+    .chart { width: 100%; min-height: 350px; }
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid #e4eaef; text-align: right; white-space: nowrap; }
+    th { font-weight: 600; color: #455966; white-space: normal; line-height: 1.4; vertical-align: bottom; }
+    th:first-child, td:first-child { text-align: left; }
+    @media (max-width: 820px) { .cards { grid-template-columns: 1fr 1fr; } main { padding: 14px; } }
+  </style>
+  <script>__PLOTLY_JS__</script>
+</head>
+<body>
+<main>
+  <h1>FlowSim supply chain</h1>
+  <p id="run-details" class="muted"></p>
+  <div class="cards" id="cards"></div>
+  <section>
+    <h2>Stock-point performance</h2>
+    <p class="muted">Measures use review periods after warm-up. Stock and backorders are end-of-period values. The fill rate is the share of each period's new demand filled from stock in that period. The bullwhip ratio is the variance of orders placed divided by the variance of orders received.</p>
+    <div class="table-wrap"><table id="stock-points"></table></div>
+  </section>
+  <section>
+    <h2>Orders up the chain</h2>
+    <p class="muted">Each line is the quantity a stage ordered in each period, beside consumer demand. Wider swings upstream are the bullwhip effect. The dashed line marks the end of warm-up, and the vertical scale fits the measured weeks, so double-click the chart to include startup orders.</p>
+    <div class="chart" id="orders"></div>
+  </section>
+  <section>
+    <div class="toolbar">
+      <label for="stock-choice">Explore a stock point</label>
+      <select id="stock-choice"></select>
+    </div>
+    <h2>Stock, backorders, and orders</h2>
+    <p class="muted">Values are recorded after each review's order. Orders received are consumer demand at the first stage and the downstream stage's orders elsewhere.</p>
+    <div class="chart" id="inventory"></div>
+  </section>
+  <section>
+    <h2>Raw records</h2>
+    <p class="muted">The inventory records hold one row per stock point and period. A shipment with no arrival time was still in transit at the end.</p>
+    <div class="toolbar">
+      <button id="download-inventory">Download inventory CSV</button>
+      <button id="download-shipments">Download shipments CSV</button>
+    </div>
+  </section>
+</main>
+<script id="result-data" type="application/json">__RESULT_JSON__</script>
+<script>
+  const result = JSON.parse(document.getElementById("result-data").textContent);
+  const config = {responsive: true, displaylogo: false};
+  const unit = result.time_unit;
+  const format = value => value === null || value === undefined ? "Not observed" :
+    typeof value === "number" ? value.toLocaleString(undefined, {maximumFractionDigits: 3}) : String(value);
+  const percent = value => value === null || value === undefined ? "Not observed" : (100 * value).toFixed(1) + "%";
+  document.getElementById("run-details").textContent =
+    "Chain: " + result.chain.join(" → ") + ". Review period: " + format(result.period) + " " + unit +
+    ". Reviews end at " + format(result.duration) + " " + unit + ". Measurement begins at " + format(result.warmup) + " " + unit +
+    ". Seed: " + result.seed + ".";
+  const first = result.stock_points[0];
+  const last = result.stock_points[result.stock_points.length - 1];
+  const cards = [
+    ["Periods measured", format(first.periods)],
+    [first.stock_point + " fill rate", percent(first.fill_rate)],
+    [first.stock_point + " bullwhip ratio", format(first.bullwhip_ratio)],
+    [last.stock_point + " bullwhip ratio", format(last.bullwhip_ratio)]
+  ];
+  cards.forEach(([label, value]) => {
+    const card = document.createElement("div"); card.className = "card";
+    const caption = document.createElement("span"); caption.textContent = label;
+    const number = document.createElement("span"); number.className = "value"; number.textContent = value;
+    card.append(caption, number); document.getElementById("cards").append(card);
+  });
+  function table(element, rows, columns) {
+    element.replaceChildren();
+    const head = document.createElement("thead"); const header = document.createElement("tr");
+    columns.forEach(([key, label]) => { const th = document.createElement("th"); th.textContent = label; header.append(th); });
+    head.append(header); element.append(head);
+    const body = document.createElement("tbody");
+    rows.forEach(row => {
+      const tr = document.createElement("tr");
+      columns.forEach(([key]) => {
+        const td = document.createElement("td");
+        td.textContent = result.percent_columns.includes(key) ? percent(row[key]) : format(row[key]);
+        tr.append(td);
+      });
+      body.append(tr);
+    });
+    element.append(body);
+  }
+  table(document.getElementById("stock-points"), result.stock_points, [
+    ["stock_point", "Stock point"], ["mean_demand", "Mean orders received"], ["mean_order", "Mean orders placed"],
+    ["bullwhip_ratio", "Bullwhip ratio"], ["fill_rate", "Fill rate"], ["mean_on_hand", "Mean on hand"],
+    ["mean_backorders", "Mean backorders"], ["lost_units", "Lost sales"]
+  ]);
+  const stockChoice = document.getElementById("stock-choice");
+  result.stock_points.forEach(row => {
+    const option = document.createElement("option"); option.value = row.stock_point; option.textContent = row.stock_point; stockChoice.append(option);
+  });
+  const plotsReady = Promise.all(Object.entries(result.figures).map(([id, figure]) => {
+    delete figure.layout.width; figure.layout.autosize = true; figure.layout.height = 420;
+    delete figure.layout.updatemenus;
+    return Plotly.newPlot(id, figure.data, figure.layout, config);
+  }));
+  stockChoice.addEventListener("change", async () => {
+    await plotsReady;
+    // Each stock-point trace carries its name as meta, as in plots.station_menu.
+    Plotly.restyle("inventory", {visible: result.figures.inventory.data.map(trace => trace.meta === stockChoice.value)});
+  });
+  function download(name, rows, keys) {
+    const quote = value => value === null || value === undefined ? "" : '"' + String(value).replaceAll('"', '""') + '"';
+    const csv = [keys.map(quote).join(",")].concat(rows.map(row => keys.map(key => quote(row[key])).join(","))).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
+    const link = document.createElement("a"); link.href = url; link.download = name; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  document.getElementById("download-inventory").addEventListener("click", () => download("inventory.csv", result.inventory, result.columns.inventory));
+  document.getElementById("download-shipments").addEventListener("click", () => download("shipments.csv", result.shipments, result.columns.shipments));
+  window.flowsimReady = plotsReady;
+</script>
+</body>
+</html>

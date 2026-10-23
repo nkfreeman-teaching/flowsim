@@ -20,8 +20,9 @@ lesson-check = { cmd = "python -c \"import pathlib, sys; html = pathlib.Path('ou
 exercise = "python -m examples.service_day"
 extensions = "python -m examples.extensions"
 operations = "python -m examples.operations"
+supply-chain = "python -m examples.supply_chain"
 # Run every example end to end, including the notebook, after behavioral changes.
-examples = { depends-on = ["demo", "exercise", "extensions", "operations", "lesson-check"] }
+examples = { depends-on = ["demo", "exercise", "extensions", "operations", "supply-chain", "lesson-check"] }
 
 [dependencies]
 python = ">=3.12,<3.14"

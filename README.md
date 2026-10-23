@@ -7,7 +7,9 @@ servers, and routes between them. A small built-in scheduler orders the events,
 and student code uses ordinary Python calls and NumPy duration samplers. Results
 are Polars tables, Plotly figures, CSV exports, and an offline HTML viewer. A
 Marimo lesson in `examples/lesson.py` is an optional classroom client, and the
-package itself has no Marimo dependency.
+package itself has no Marimo dependency. FlowSim also models supply chains of
+stock points that fill orders from inventory and reorder each period (see
+Inventory and ordering).
 
 ## Getting started
 
@@ -340,6 +342,111 @@ resampling it. Repairs run independently in elapsed time, including off-shift
 periods, since there is no shared repair crew. A completed job that is blocked
 can still transfer while its former server is down.
 
+### Inventory and ordering
+
+A supply chain is a sequence of stock points (i.e., stages that hold inventory)
+that fill orders from stock and reorder from the next stage up the chain.
+`model.demand` draws consumer demand as a quantity per review period,
+`model.stock_point` defines a stage, and `model.supply` lists the chain from
+demand to the top stage, which orders from a supplier with unlimited stock that
+ships in the same period. A model holds either a service network or a supply
+chain, since stock points cannot yet release work to stations, and a supply
+chain run does not accept `drain=True`.
+
+```python
+from flowsim import Model, moving_average, order_up_to
+
+chain = Model(time_unit="weeks")
+consumers = chain.demand(
+    name="Consumers",
+    per_period=lambda rng: rng.normal(100, 10),
+)
+stages = [
+    chain.stock_point(
+        name=name,
+        initial=200,
+        lead_time=2,
+        shortage="backorder",
+        policy=order_up_to(
+            forecast=moving_average(window=5),
+            safety_factor=0,
+        ),
+        forecast_from="orders",
+    )
+    for name in ["Retailer", "Wholesaler", "Factory"]
+]
+chain.supply(
+    [consumers, *stages],
+    period=1,
+)
+supply_run = chain.run(
+    duration=104,
+    seed=7,
+    warmup=20,
+)
+print(supply_run.stock_points)
+supply_run.orders_plot().show()
+supply_run.inventory_plot().show()
+supply_run.viewer("output/supply-chain.html")
+```
+
+Every stock-point argument is required, since each is a behavioral choice.
+`initial` is the stock on hand at time zero, with nothing on order. `lead_time`
+is the delay from the supplier's shipment to this stage's receipt, either a
+constant that is a whole number of review periods or a sampling function.
+`shortage` is `"backorder"` (unfilled orders wait and ship first when stock
+arrives) or `"lost"` (unfilled orders disappear, and the downstream stage stops
+expecting them). `forecast_from` is `"orders"` (each stage forecasts from the
+orders it receives) or `"end_demand"` (each stage forecasts from consumer
+demand, i.e., information sharing).
+
+`order_up_to` sets a target equal to cover times the moving-average forecast
+plus safety stock, and each stage orders the target minus its inventory
+position (on hand plus on order minus backorders), or nothing when the position
+already meets the target. Cover is the number of periods of demand an order must
+cover, which is `lead_time / period` for a constant lead time. A sampled lead
+time requires `cover=` in `order_up_to`, since FlowSim does not estimate the
+mean of a sampling function. Safety stock is `safety_factor * sqrt(cover)` times
+the sample standard deviation of the demands in the forecast window, and it
+stays zero until the window is full, because a deviation estimated from two or
+three early observations can set a target far above steady demand. Before
+`window` periods have passed, the forecast averages every observation so far.
+
+Each review period runs from the retailer up the chain. At each stage, the
+shipments due in the period arrive, backorders and then the period's incoming
+orders are filled from stock, and the stage reviews its position and orders.
+A stage's incoming orders are consumer demand at the retailer and, at every
+other stage, the order its downstream stage placed in the same period, which
+follows the model of Chen, Drezner, Ryan, and Simchi-Levi (1999). A shipment
+arrives at the first review at or after its lead time, at least one period after
+it was sent, and never before an earlier shipment to the same stage. Each
+stage's sampled lead times come from its own random stream, and consumer demand
+depends only on the seed and the demand's name, so adding a stage leaves
+consumer demand unchanged.
+
+A supply chain run fills three further tables, which `export` writes beside the
+empty customer tables, and its viewer shows each stage's orders, stock, and
+backorders.
+
+| File | Contents |
+| --- | --- |
+| `inventory.csv` | One row per stock point and period with receipts, incoming orders, units filled in the same period, units shipped, lost sales, and end-of-period stock, backorders, units on order, position, forecast, target, and order quantity. |
+| `shipments.csv` | Each shipment's sender, receiver, quantity, ship time, lead time, and arrival time, which is empty for a shipment still in transit at the end. |
+| `stock_points.csv` | Each stage's mean incoming orders and orders placed, their variances, bullwhip ratio, fill rate, mean stock and backorders, and lost sales over the measured periods. |
+
+Stock-point measures use review periods at or after warm-up. The bullwhip ratio
+is the variance of a stage's orders divided by the variance of the orders it
+receives, both with the n - 1 divisor, and it is missing when incoming orders do
+not vary. The fill rate is the share of each period's incoming orders filled
+from stock in that period, so filled backorders do not count toward it. Mean
+stock and backorders average end-of-period values rather than integrating over
+time. For independent demand, a moving average over p periods, cover L, and no
+safety stock, the retailer's ratio is 1 + 2L/p + 2L^2/p^2 (Chen et al. 1999,
+equation 14.8), i.e., 2.12 for p = 5 and L = 2, and the test suite checks the
+simulator against this value. However, the closed form allows negative orders
+and FlowSim never orders less than zero, so it applies only when demand rarely
+falls far enough to call for a negative order.
+
 ## Measurement rules
 
 Arrivals occur in `[0, duration)`. With the default `drain=False`, service also
@@ -353,7 +460,8 @@ closing with a dashed line.
 
 Several events can occur at the same instant. FlowSim processes shift changes
 first, then service completions, transfers, failures, and repairs in the order
-they were scheduled, then new arrivals, and drain checks last. Thus, a server that finishes a job at minute 10 is free for a
+they were scheduled, then new arrivals, then stock-point reviews, and drain
+checks last. Thus, a server that finishes a job at minute 10 is free for a
 customer who arrives at minute 10, and the state trace keeps the final state at
 each time.
 
@@ -471,7 +579,7 @@ subtracts the baseline scenario (the first scenario unless `baseline=` names
 another) within each matched replication, then estimates a Student t interval
 across those paired differences. A missing value excludes that pair and reduces
 `observed_runs`. `plot`, `viewer`, and `export` accept the same `metric`,
-`station`, `confidence`, and `baseline` arguments. These defaults differ from
+`station`, `stock_point`, `confidence`, and `baseline` arguments. These defaults differ from
 an experiment's, since `experiment.intervals()` reports `mean_wait` for every
 station, while `comparison.intervals()` reports `mean_total_wait` and needs
 `station=` for a station metric. Compared models must declare
@@ -485,7 +593,11 @@ because a station draws in the order customers reach it.
 
 The table below lists the metrics that `intervals`, `differences`, and `plot`
 accept. System metrics come from `summary`, and station metrics come from
-`stations` and require a station name in a comparison.
+`stations` and require a station name in a comparison. Stock-point metrics come
+from `stock_points` and require `stock_point=` in a comparison, and their
+interval tables name the stage in a `stock_point` column rather than `station`.
+An experiment reports a stock-point metric for every stage unless `stock_point=`
+names one.
 
 | Metric | Scope | Meaning |
 | --- | --- | --- |
@@ -514,11 +626,16 @@ accept. System metrics come from `summary`, and station metrics come from
 | `mean_scheduled_servers` | Station | Mean number of scheduled servers |
 | `mean_available_servers` | Station | Mean number of available servers |
 | `mean_outside_queue` | Station | Time-average customers waiting outside the station |
+| `bullwhip_ratio` | Stock point | Variance of orders placed divided by variance of orders received |
+| `fill_rate` | Stock point | Share of incoming orders filled from stock in the same period |
+| `mean_on_hand` | Stock point | Mean end-of-period stock on hand |
+| `mean_backorders` | Stock point | Mean end-of-period backorders |
+| `lost_units` | Stock point | Lost sales over the measured periods |
 
 The offline comparison viewer shows scenario means and paired differences for
 one metric (e.g., `viewer(metric="overtime")`). Comparison exports contain
-per-replication system and station metrics, scenario intervals, paired
-differences, and metadata. Raw customer records remain in
+per-replication system and station metrics (and stock-point metrics for supply
+chains), scenario intervals, paired differences, and metadata. Raw customer records remain in
 `comparison.experiments[scenario].runs`, and each run has its own `export()`.
 The intervals are nominal for each reported metric or contrast, i.e., they are
 not simultaneous confidence bounds across every scenario and metric.
@@ -596,6 +713,39 @@ to exit, since FlowSim cannot split a load into pallets or combine pallets into
 an outbound trailer, and every blank follows the same routing, since customers
 carry no product type.
 
+## Supply chain example
+
+`examples/supply_chain.py` builds a four-stage chain in the style of the beer
+game (i.e., a retailer, wholesaler, distributor, and factory, each ordering from
+the next) and studies the bullwhip effect. Consumer demand averages 100 cases
+per week with a standard deviation of 20, every stage receives shipments two
+weeks after they are sent, and each stage carries one standard deviation of
+safety stock. `bullwhip_study` runs 20 replications of 104 weeks with a 20-week
+warm-up and compares forecasting from orders with sharing consumer demand and
+with a ten-week moving average. `pixi run supply-chain` writes the comparison
+report, the per-replication stock-point table, and the first replication's
+records and viewer under `output/supply_chain/`.
+
+In the saved study, forecasting from orders gives a retailer bullwhip ratio of
+2.25 (95% CI 2.18 to 2.32), above the closed-form 2.12 because safety stock
+estimated from five weeks of demand also varies. The ratios compound up the
+chain, so factory orders vary 37.6 times as much as consumer demand. Sharing
+consumer demand leaves the retailer unchanged, since the retailer already sees
+that demand, and lowers the factory's own ratio by 0.89 (95% CI 0.77 to 1.00),
+which cuts factory order variance to 9.7 times consumer demand. A ten-week
+average damps every stage (factory order variance 8.6 times consumer demand) and
+raises the retailer's fill rate from 87.0% to 91.4%. Sharing instead lowers the
+retailer's fill rate to 84.4%, since the wholesaler then plans its stock from
+consumer demand while still filling the retailer's more variable orders, and
+its own fill rate falls from 83.4% to 77.9%. Thus, sharing demand removes most
+of the amplification between stages, but the stages that receive the shared
+data still need stock sized to the orders they actually fill.
+
+Each stage starts with 200 cases on hand and nothing on order, so the first
+weeks carry a startup surge of orders that the warm-up excludes. The orders
+chart in the viewer scales to the measured weeks, and double-clicking it shows
+the surge.
+
 ## For maintainers
 
 `AGENTS.md` states the project rules for contributors and coding agents. The
@@ -622,8 +772,10 @@ FlowSim supports acyclic routes, first-come, first-served service, identical
 servers within each station, scheduled demand and staffing, finite buffers,
 blocking after service, and independent failures with resumable work. Every
 station has its own server pool. Priorities, reneging, batches, workers shared
-across stations, shared repair crews, inventory policies, and rework loops are
-not implemented.
+across stations, shared repair crews, and rework loops are not implemented.
+Supply chains are linear, review every stage on one period, order with an
+order-up-to policy and a moving-average forecast, and cannot share a model with
+a service network, so a factory's lead time stands in for its production.
 
 Runs keep every customer, visit, and state record in memory, which suits
 classroom-scale examples. There is no streaming or aggregate-only mode, and the

@@ -4,7 +4,12 @@ import polars as pl
 import pytest
 
 from flowsim import Model, compare
-from tests.models import combined_line, deterministic_queue, service_network
+from tests.models import (
+    beer_chain,
+    combined_line,
+    deterministic_queue,
+    service_network,
+)
 
 
 @pytest.mark.parametrize("drain", [False, True])
@@ -156,3 +161,50 @@ def test_extended_viewer_shows_resource_states_rejections_and_paused_work(
     assert (
         f"{rejected} matching customers" in page.locator("#page-details").inner_text()
     )
+
+
+def test_supply_viewer_switches_stock_points_and_downloads_records(
+    tmp_path, offline_page
+):
+    result = beer_chain().run(
+        duration=30,
+        seed=4,
+        warmup=5,
+    )
+    viewer = tmp_path / "supply.html"
+    result.viewer(viewer)
+    page = offline_page(viewer)
+    page.wait_for_function("window.flowsimReady !== undefined")
+    page.evaluate("window.flowsimReady")
+    assert page.locator(".js-plotly-plot").count() == 2
+    assert page.locator("#stock-points tbody tr").count() == 4
+    assert page.locator("#stock-choice option").all_text_contents() == [
+        "Retailer",
+        "Wholesaler",
+        "Distributor",
+        "Factory",
+    ]
+    # Consumer demand plus one order trace per stage.
+    assert page.evaluate("document.getElementById('orders').data.length") == 5
+    page.select_option("#stock-choice", "Factory")
+    page.wait_for_function(
+        "document.getElementById('inventory').data[12].visible === true"
+    )
+    # Each stock point draws four traces.
+    assert (
+        page.evaluate(
+            "document.getElementById('inventory').data.map(trace => trace.visible)"
+        )
+        == [False] * 12 + [True] * 4
+    )
+    for name in ["inventory", "shipments"]:
+        with page.expect_download() as download_info:
+            page.click(f"#download-{name}")
+        path = tmp_path / f"{name}.csv"
+        download_info.value.save_as(path)
+        downloaded = pl.read_csv(
+            source=path,
+            schema_overrides=getattr(result, name).schema,
+        )
+        assert downloaded.height == getattr(result, name).height
+        assert downloaded.columns == getattr(result, name).columns

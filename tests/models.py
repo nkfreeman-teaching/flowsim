@@ -3,7 +3,7 @@
 Editing an example for teaching reasons must not change these models.
 """
 
-from flowsim import Model
+from flowsim import Model, moving_average, order_up_to
 
 
 def deterministic_queue(capacity: int = 1) -> Model:
@@ -172,4 +172,36 @@ def breaks_after_first_repair() -> Model:
         failure_clock="available",
     )
     model.route([arrivals, machine, model.exit])
+    return model
+
+
+def beer_chain(forecast_from: str = "orders") -> Model:
+    """Four stages with weekly reviews, two-week lead times, and normal demand.
+
+    Demand has mean 100 and standard deviation 10, so orders are rarely
+    truncated at zero. Each stage starts with its first target of 200 units.
+    """
+    model = Model(time_unit="weeks")
+    demand = model.demand(
+        name="Consumers",
+        per_period=lambda rng: rng.normal(100, 10),
+    )
+    stages = [
+        model.stock_point(
+            name=name,
+            initial=200,
+            lead_time=2,
+            shortage="backorder",
+            policy=order_up_to(
+                forecast=moving_average(window=5),
+                safety_factor=0,
+            ),
+            forecast_from=forecast_from,
+        )
+        for name in ["Retailer", "Wholesaler", "Distributor", "Factory"]
+    ]
+    model.supply(
+        [demand, *stages],
+        period=1,
+    )
     return model

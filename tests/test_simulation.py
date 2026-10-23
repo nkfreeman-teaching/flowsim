@@ -853,6 +853,8 @@ def test_disabled_source_never_samples():
         (results._State, results.STATE_SCHEMA),
         (results._Activity, results.ACTIVITY_SCHEMA),
         (results._Failure, results.FAILURE_SCHEMA),
+        (results._Inventory, results.INVENTORY_SCHEMA),
+        (results._Shipment, results.SHIPMENT_SCHEMA),
     ],
 )
 def test_record_fields_equal_schema_columns(record, schema):
@@ -1244,7 +1246,7 @@ def test_imports_sit_at_module_level_except_the_plot_methods():
                         local.append((path.name, node.module))
                     elif isinstance(node, ast.Import):
                         local.extend((path.name, alias.name) for alias in node.names)
-    assert local == [("results.py", "flowsim.plots")] * 6
+    assert local == [("results.py", "flowsim.plots")] * 8
     tree = ast.parse((package / "validation.py").read_text(encoding="utf-8"))
     imported = [
         node.module if isinstance(node, ast.ImportFrom) else alias.name

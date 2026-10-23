@@ -425,3 +425,133 @@ def viewer_html(result: Results) -> str:
     return template.replace("__PLOTLY_JS__", get_plotlyjs()).replace(
         "__RESULT_JSON__", data
     )
+
+
+# Stock-point order traces cycle through these colors, after consumer demand.
+STAGE_COLORS = [BLUE, ORANGE, GREEN, PURPLE, "#E69F00", "#56B4E9"]
+
+
+def stock_point_names(result: Results) -> list[str]:
+    return [] if result.supply is None else result.supply["chain"][1:]
+
+
+def warmup_line(figure: go.Figure, result: Results) -> None:
+    if result.warmup > 0:
+        figure.add_vline(
+            x=result.warmup,
+            line_color=GRAY,
+            line_dash="dash",
+        )
+
+
+def orders_plot(result: Results) -> go.Figure:
+    """Plot consumer demand and every stage's orders, which shows the bullwhip."""
+    names = stock_point_names(result)
+    figure = go.Figure()
+    if names:
+        retailer = result.inventory.filter(pl.col("stock_point") == names[0])
+        figure.add_trace(
+            go.Scatter(
+                x=retailer.get_column("time").to_list(),
+                y=retailer.get_column("demand").to_list(),
+                name=label(result.supply["chain"][0]),
+                mode="lines",
+                line={"color": GRAY, "width": 2, "dash": "dot"},
+            )
+        )
+    for index, name in enumerate(names):
+        rows = result.inventory.filter(pl.col("stock_point") == name)
+        figure.add_trace(
+            go.Scatter(
+                x=rows.get_column("time").to_list(),
+                y=rows.get_column("order_quantity").to_list(),
+                name=label(f"{name} orders"),
+                mode="lines",
+                line={"color": STAGE_COLORS[index % len(STAGE_COLORS)], "width": 2},
+            )
+        )
+    style(
+        figure=figure,
+        x_label=f"Review time ({result.time_unit})",
+        y_label="Units per period",
+    )
+    warmup_line(figure, result)
+    # Startup orders can dwarf the measured weeks, so the initial view scales
+    # to the periods after warm-up. Autoscaling restores the full range.
+    measured = result.inventory.filter(pl.col("time") >= result.warmup)
+    if result.warmup > 0 and not measured.is_empty():
+        top = max(
+            measured.get_column("order_quantity").max(),
+            measured.get_column("demand").max(),
+        )
+        figure.update_yaxes(range=[0, 1.05 * top])
+    return figure
+
+
+def inventory_plot(result: Results) -> go.Figure:
+    """Plot one stock point's stock, backorders, and orders, with a menu."""
+    names = stock_point_names(result)
+    figure = go.Figure()
+    fields = [
+        ("on_hand", BLUE, "On hand", "solid"),
+        ("backorders", ORANGE, "Backorders", "solid"),
+        ("order_quantity", GREEN, "Orders placed", "solid"),
+        ("demand", GRAY, "Orders received", "dot"),
+    ]
+    for index, name in enumerate(names):
+        rows = result.inventory.filter(pl.col("stock_point") == name)
+        for field, color, trace_name, dash in fields:
+            figure.add_trace(
+                go.Scatter(
+                    x=rows.get_column("time").to_list(),
+                    y=rows.get_column(field).to_list(),
+                    name=trace_name,
+                    mode="lines",
+                    line={"color": color, "width": 2, "dash": dash},
+                    visible=index == 0,
+                    meta=name,
+                )
+            )
+    station_menu(
+        figure=figure,
+        stations=names,
+    )
+    style(
+        figure=figure,
+        x_label=f"Review time ({result.time_unit})",
+        y_label="Units at the end of the period",
+    )
+    warmup_line(figure, result)
+    return figure
+
+
+def supply_viewer_html(result: Results) -> str:
+    payload = {
+        "figures": {
+            "orders": json.loads(result.orders_plot().to_json()),
+            "inventory": json.loads(result.inventory_plot().to_json()),
+        },
+        "chain": result.supply["chain"],
+        "period": result.supply["period"],
+        "stock_points": result.stock_points.to_dicts(),
+        "inventory": result.inventory.to_dicts(),
+        "shipments": result.shipments.to_dicts(),
+        # Downloads use the export column order, even for empty tables.
+        "columns": {
+            "inventory": result.inventory.columns,
+            "shipments": result.shipments.columns,
+        },
+        "percent_columns": [
+            name for name, metric in METRICS.items() if metric.kind == "fraction"
+        ],
+        "duration": result.duration,
+        "warmup": result.warmup,
+        "time_unit": result.time_unit,
+        "seed": result.seed,
+    }
+    # Escape '<' so model labels cannot terminate the embedded JSON script.
+    data = json.dumps(payload, allow_nan=False).replace("<", "\\u003c")
+    template = Path(__file__).with_name("supply.html").read_text(encoding="utf-8")
+    return template.replace("__PLOTLY_JS__", get_plotlyjs()).replace(
+        "__RESULT_JSON__", data
+    )
