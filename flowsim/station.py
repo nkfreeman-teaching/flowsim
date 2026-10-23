@@ -43,6 +43,16 @@ class _Ticket:
 
 
 class _Server:
+    """One server's schedule, repair state, current customer, and phase.
+
+    A server is scheduled while the staffing level covers its identifier, down
+    during a repair, and holds at most one ticket. Its phase is idle without a
+    ticket, processing while available, paused while unavailable during
+    service, and blocked while its finished customer waits for room downstream.
+    The changed event succeeds on every phase, schedule, or repair change, which
+    wakes any countdown that runs on this server.
+    """
+
     def __init__(self, station: _Station, identifier: int, seeds):
         self.station = station
         self.run = station.run
@@ -181,6 +191,15 @@ class _Server:
 
 
 class _Station:
+    """One station's servers, waiting line, admission queue, and shifts.
+
+    The waiting line holds admitted tickets in first-come, first-served order,
+    up to the buffer. The pending queue holds tickets not yet admitted, from
+    outside arrivals and blocked upstream transfers alike, in request order.
+    Dispatch first gives waiting tickets to idle servers, then admits pending
+    tickets while there is room.
+    """
+
     def __init__(self, run: _Run, node: Node, seed: np.random.SeedSequence):
         self.run = run
         self.node = node
@@ -334,6 +353,13 @@ class _Station:
             self.drain_check_pending = True
             self.run.scheduler.process(self.settled_drain_check())
 
+    def staffed_later(self, level: int) -> bool:
+        """Return whether a later shift change schedules at least this level."""
+        return self.node.staffing is not None and any(
+            time > self.run.scheduler.now and scheduled >= level
+            for time, scheduled in self.node.staffing
+        )
+
     def settled_drain_check(self):
         # Shift changes and completions at this instant can restore staffing
         # or finish paused work, so judge the state after they all run.
@@ -342,10 +368,7 @@ class _Station:
         future = (
             self.node.staffing is None
             or self.scheduled_level > 0
-            or any(
-                time > self.run.scheduler.now and level > 0
-                for time, level in self.node.staffing
-            )
+            or self.staffed_later(1)
         )
         paused = self.node.shift_end != "finish" and any(
             server.phase == Phase.PAUSED for server in self.servers
@@ -359,10 +382,7 @@ class _Station:
                 server.phase == Phase.PAUSED
                 and not server.scheduled
                 and self.node.shift_end == "pause"
-                and not any(
-                    time > self.run.scheduler.now and level >= server.id
-                    for time, level in self.node.staffing
-                )
+                and not self.staffed_later(server.id)
             ):
                 raise RuntimeError(
                     f"Cannot drain station {self.node.name!r}. Server {server.id} "

@@ -859,3 +859,48 @@ def test_invalid_rate_schedules(points, message):
 def test_advanced_rules_are_explicit_and_validated(options, message):
     with pytest.raises(ValueError, match=message):
         single_station(**options)
+
+
+@pytest.mark.parametrize("returning", [1, 2])
+def test_paused_server_needs_a_later_level_that_covers_it(returning):
+    # By hand: customers One and Two arrive at 0 and take servers 1 and 2 for 4
+    # units each. At 1 the level falls to 1, so server 2 pauses with 3 units
+    # left. If the level at 3 is only 1, server 2 never returns. If it is 2,
+    # server 2 resumes at 3 and finishes at 6.
+    model = Model()
+    one = model.source(
+        name="One",
+        interarrival=10,
+        first_arrival=0,
+        limit=1,
+    )
+    two = model.source(
+        name="Two",
+        interarrival=10,
+        first_arrival=0,
+        limit=1,
+    )
+    station = model.station(
+        name="Service",
+        capacity=2,
+        service_time=4,
+        staffing=[(0, 2), (1, 1), (3, returning)],
+        shift_end="pause",
+    )
+    model.route([one, station, model.exit])
+    model.route([two, station, model.exit])
+    if returning == 1:
+        with pytest.raises(RuntimeError, match="Server 2 has paused work"):
+            model.run(
+                duration=2,
+                drain=True,
+            )
+        return
+    result = model.run(
+        duration=2,
+        drain=True,
+    )
+    assert result.visits.get_column("service_end").to_list() == [4, 6]
+    assert result.end_time == 6
+    paused = result.activities.filter(pl.col("state") == "paused")
+    assert paused.select("server_id", "start", "end").rows() == [(2, 1.0, 3.0)]
