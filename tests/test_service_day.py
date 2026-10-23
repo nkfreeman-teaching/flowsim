@@ -544,6 +544,43 @@ def test_experiments_reject_runs_of_different_models():
     )
 
 
+def test_experiment_and_comparison_intervals_have_different_defaults():
+    # One server gives waits 0, 1, and 2 in every replication, and two servers
+    # give 0, 0, and 0. An experiment defaults to mean_wait at every station,
+    # and a comparison defaults to the system's mean_total_wait.
+    trial = deterministic_queue().experiment(
+        duration=7,
+        replications=3,
+    )
+    station = trial.intervals()
+    assert station.select(
+        "station",
+        "metric",
+        "mean",
+    ).rows() == [("Service", "mean_wait", 1.0)]
+    result = compare(
+        scenarios={
+            "One": deterministic_queue(),
+            "Two": deterministic_queue(capacity=2),
+        },
+        duration=3,
+        replications=3,
+        drain=True,
+    )
+    system = result.intervals()
+    assert system.select(
+        "scenario",
+        "metric",
+        "station",
+        "mean",
+    ).rows() == [
+        ("One", "mean_total_wait", None, 1.0),
+        ("Two", "mean_total_wait", None, 0.0),
+    ]
+    with pytest.raises(ValueError, match="name a station"):
+        result.intervals(metric="mean_wait")
+
+
 def test_experiment_intervals_cover_system_and_named_station_metrics():
     trial = deterministic_queue().experiment(
         duration=7,

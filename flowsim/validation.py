@@ -16,7 +16,7 @@ Duration = Real | Sampler
 
 
 def number(value: object, label: str, *, positive: bool = False) -> float:
-    """Require a finite scalar duration, in the model's time unit."""
+    """Require a finite nonnegative scalar, or a positive one if positive is set."""
     if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
         raise ValueError(f"{label} must be a finite number, not {value!r}.")
     result = float(value)

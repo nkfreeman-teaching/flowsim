@@ -231,7 +231,7 @@ class Model:
         proposal = self._graph.copy()
         proposal.add_edges_from([(a.name, b.name) for a, b in edges])
         if not nx.is_directed_acyclic_graph(proposal):
-            raise ValueError("The prototype supports acyclic routes only.")
+            raise ValueError("FlowSim supports acyclic routes only.")
         for origin, destination in edges:
             self._graph.add_edge(
                 u_of_edge=origin.name,
@@ -273,7 +273,7 @@ class Model:
         proposal = self._graph.copy()
         proposal.add_edges_from([(origin.name, node.name) for node in destinations])
         if not nx.is_directed_acyclic_graph(proposal):
-            raise ValueError("The prototype supports acyclic routes only.")
+            raise ValueError("FlowSim supports acyclic routes only.")
         for destination, probability in zip(destinations, probabilities):
             self._graph.add_edge(
                 u_of_edge=origin.name,

@@ -121,6 +121,11 @@ results.utilization_plot().show()
 results.customer_plot(1).show()
 ```
 
+`results.resource_plot()` draws each station's scheduled, available,
+processing, blocked, paused, and down servers over time. The viewer includes
+it when a model uses staffing schedules, finite buffers, or failures (see
+Model features).
+
 `results.export("output/my-run")` writes seven CSV files and one metadata file.
 Exports keep missing starts and exits as empty CSV fields and never replace an
 unknown outcome with zero.
@@ -465,7 +470,10 @@ subtracts the baseline scenario (the first scenario unless `baseline=` names
 another) within each matched replication, then estimates a Student t interval
 across those paired differences. A missing value excludes that pair and reduces
 `observed_runs`. `plot`, `viewer`, and `export` accept the same `metric`,
-`station`, `confidence`, and `baseline` arguments. Compared models must declare
+`station`, `confidence`, and `baseline` arguments. These defaults differ from
+an experiment's, since `experiment.intervals()` reports `mean_wait` for every
+station, while `comparison.intervals()` reports `mean_total_wait` and needs
+`station=` for a station metric. Compared models must declare
 the same time unit, and a station metric requires that station in every
 scenario. Replication identity and seed matching are checked before paired
 differences are calculated. Matching seeds give each node the same draws in

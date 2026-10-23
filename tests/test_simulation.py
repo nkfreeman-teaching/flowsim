@@ -456,8 +456,10 @@ def test_graph_validation_and_route_edit_are_atomic():
     model.route([source, a])
     with pytest.raises(ValueError, match="unreachable|route to the exit"):
         model.run(duration=5)
-    with pytest.raises(ValueError, match="acyclic"):
+    with pytest.raises(ValueError, match="^FlowSim supports acyclic routes only.$"):
         model.route([a, b, a])
+    with pytest.raises(ValueError, match="^FlowSim supports acyclic routes only.$"):
+        model.branch(a, {b: 0.5, a: 0.5})
     assert model.graph.out_degree(a.name) == 0
     assert model.graph.out_degree(b.name) == 0
     with pytest.raises(ValueError, match="sum to one"):
