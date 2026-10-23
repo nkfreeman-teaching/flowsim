@@ -250,8 +250,8 @@ have 24 calls outside the rule.
 | 5.2 | Build each customer timeline once, in Python | `plots.py:306-375`, `viewer.html:223-275` | Opus, Sonnet | done (491d6e8) |
 | 5.3 | Move the comparison page to a template file | `comparison.py:276-335` | Sonnet | done (0c662d0) |
 | 5.4 | Fix README and message drift | README, `model.py:24`, `:259`, `:301` | Opus, Sonnet | done (9de0591) |
-| 5.5 | Derive example labels and constants from one place | `examples/`, `tests/test_examples.py:40` | Opus, Sonnet | done |
-| 5.6 | Round-trip every exported CSV in the export test | `tests/test_simulation.py:361-377` | Sonnet | open |
+| 5.5 | Derive example labels and constants from one place | `examples/`, `tests/test_examples.py:40` | Opus, Sonnet | done (4946b77) |
+| 5.6 | Round-trip every exported CSV in the export test | `tests/test_simulation.py:361-377` | Sonnet | done |
 | 5.7 | Reword the AGENTS.md test-model rule | `AGENTS.md` | Sonnet | open (owner approved) |
 
 **5.1.** The viewer JS hard-codes `Math.floor(i / 2)` and `Math.floor(i / 6)` (`viewer.html:217`,

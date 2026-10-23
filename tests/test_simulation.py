@@ -498,19 +498,60 @@ def test_invalid_duration_warmup_and_replications():
 
 
 def test_export_round_trip_preserves_missing_values(tmp_path):
-    result = deterministic_queue().run(duration=3)
-    result.export(tmp_path)
-    customers = pl.read_csv(
-        source=tmp_path / "customers.csv",
-        schema_overrides=result.customers.schema,
+    # The queue stops at 3 with customers 2 and 3 unfinished, so their exits
+    # are null. The machine serves one part from 0 to 2, fails at 3, and is
+    # still in a 4-minute repair at 5, so repair_end is null.
+    machine = Model()
+    parts = machine.source(
+        name="Parts",
+        interarrival=10,
+        first_arrival=0,
+        limit=1,
     )
-    visits = pl.read_csv(
-        source=tmp_path / "visits.csv",
-        schema_overrides=result.visits.schema,
+    station = machine.station(
+        name="Machine",
+        capacity=1,
+        service_time=2,
+        time_to_failure=3,
+        repair_time=4,
+        failure_clock="available",
     )
-    assert_frame_equal(customers, result.customers)
-    assert_frame_equal(visits, result.visits)
-    metadata = json.loads((tmp_path / "metadata.json").read_text())
+    machine.route([parts, station, machine.exit])
+    runs = {
+        "queue": deterministic_queue().run(duration=3),
+        "machine": machine.run(duration=5),
+    }
+    # Results._system_metrics builds the summary without a schema constant, so
+    # the summary is read back with its own schema.
+    schemas = {
+        "customers": results.CUSTOMER_SCHEMA,
+        "visits": results.VISIT_SCHEMA,
+        "states": results.STATE_SCHEMA,
+        "stations": results.STATION_SCHEMA,
+        "activities": results.ACTIVITY_SCHEMA,
+        "failures": results.FAILURE_SCHEMA,
+    }
+    read = {}
+    for name, result in runs.items():
+        result.export(tmp_path / name)
+        exported = sorted(path.stem for path in (tmp_path / name).glob("*.csv"))
+        assert exported == sorted([*schemas, "summary"])
+        for table, schema in [*schemas.items(), ("summary", result.summary.schema)]:
+            read[name, table] = pl.read_csv(
+                source=tmp_path / name / f"{table}.csv",
+                schema=schema,
+            )
+            assert_frame_equal(read[name, table], getattr(result, table))
+    assert read["queue", "customers"].get_column("exit_time").to_list() == [
+        2,
+        None,
+        None,
+    ]
+    assert read["machine", "failures"].rows() == [("Machine", 1, 3, 3, 4, None)]
+    assert read["machine", "activities"].rows() == [
+        (1, "Machine", 1, "processing", 0, 2)
+    ]
+    metadata = json.loads((tmp_path / "queue" / "metadata.json").read_text())
     assert metadata["duration"] == 3
     assert metadata["time_unit"] == "minutes"
     assert metadata["state_window"] == "[warmup, duration)"
