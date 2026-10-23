@@ -275,8 +275,8 @@ class _Station:
             station=self.node.name,
             arrival_time=now,
             service_time=sample(
-                distribution=self.node.duration,
-                rng=self.run.streams[self.node.name][0],
+                distribution=self.node.service_time,
+                rng=self.run.streams[self.node.name].durations,
                 label=f"Service time at {self.node.name!r}",
             ),
         )

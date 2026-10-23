@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import zlib
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -38,6 +38,21 @@ SETTLED_PRIORITY = 4
 DURATION_STREAM = 0
 ROUTING_STREAM = 1
 SERVER_STREAMS = 2
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
+class _Streams:
+    """A node's generators for its own durations and its routing choices.
+
+    A source draws interarrival times from durations, and a station draws
+    service times from it.
+    """
+
+    durations: np.random.Generator
+    routing: np.random.Generator
 
 
 class _Same:
@@ -75,7 +90,7 @@ class _Run:
         self.closed = False
         self.active_customers = 0
         self.finished = self.scheduler.event()
-        self.streams: dict[str, tuple[np.random.Generator, np.random.Generator]] = {}
+        self.streams: dict[str, _Streams] = {}
         names = list(model._nodes)
         keys: dict[str, int] = {}
         owners: dict[int, str] = {}
@@ -98,9 +113,9 @@ class _Run:
             )
 
         for name in names:
-            self.streams[name] = (
-                np.random.default_rng(node_seed(name, DURATION_STREAM)),
-                np.random.default_rng(node_seed(name, ROUTING_STREAM)),
+            self.streams[name] = _Streams(
+                durations=np.random.default_rng(node_seed(name, DURATION_STREAM)),
+                routing=np.random.default_rng(node_seed(name, ROUTING_STREAM)),
             )
         self.stations: dict[str, _Station] = {}
         for name in names:
@@ -161,7 +176,7 @@ class _Run:
         # Normalize floating-point roundoff after the model's sum-to-one check.
         probabilities = np.asarray(probabilities, dtype=float)
         probabilities /= probabilities.sum()
-        index = self.streams[name][1].choice(len(destinations), p=probabilities)
+        index = self.streams[name].routing.choice(len(destinations), p=probabilities)
         return self.model._nodes[destinations[index]]
 
     def next_arrival_time(self, node: Node, rng: np.random.Generator) -> float | None:
@@ -174,7 +189,7 @@ class _Run:
                 rng=rng,
             )
         gap = sample(
-            distribution=node.duration,
+            distribution=node.interarrival,
             rng=rng,
             label=f"Interarrival time at {node.name!r}",
             positive=True,
@@ -190,7 +205,7 @@ class _Run:
         return arrival
 
     def source(self, node: Node):
-        rng = self.streams[node.name][0]
+        rng = self.streams[node.name].durations
         if node.limit == 0:
             return
         arrival = node.first_arrival

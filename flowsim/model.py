@@ -63,7 +63,8 @@ class Node:
 
     name: str
     kind: str
-    duration: Duration = 0
+    interarrival: Duration | None = None
+    service_time: Duration | None = None
     capacity: int = 0
     first_arrival: float | None = None
     limit: int | None = None
@@ -150,7 +151,7 @@ class Model:
             Node(
                 name=name,
                 kind="source",
-                duration=0 if interarrival is None else interarrival,
+                interarrival=interarrival,
                 first_arrival=first,
                 limit=count,
                 arrival_rates=arrival_rates,
@@ -225,7 +226,7 @@ class Model:
             Node(
                 name=name,
                 kind="station",
-                duration=service_time,
+                service_time=service_time,
                 capacity=count,
                 staffing=staff,
                 shift_end=shift_end,

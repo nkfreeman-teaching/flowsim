@@ -798,3 +798,30 @@ def test_statuses_and_phases_use_their_enumerations():
         (2, "Prep", 1, results.Phase.PROCESSING, 1.0, 2.0),
         (2, "Prep", 1, results.Phase.BLOCKED, 2.0, None),
     ]
+
+
+def test_sources_and_stations_keep_their_own_durations():
+    # By hand: arrivals every 2 from time 0 and 3 units of service give
+    # arrivals 0, 2, 4, service starts 0, 3, 6, and service ends 3, 6, 9.
+    model = Model()
+    arrivals = model.source(
+        name="Customers",
+        interarrival=2,
+        first_arrival=0,
+        limit=3,
+    )
+    station = model.station(
+        name="Service",
+        capacity=1,
+        service_time=3,
+    )
+    model.route([arrivals, station, model.exit])
+    assert (arrivals.interarrival, arrivals.service_time) == (2, None)
+    assert (station.interarrival, station.service_time) == (None, 3)
+    visits = model.run(
+        duration=10,
+        drain=True,
+    ).visits
+    assert visits.get_column("arrival_time").to_list() == [0, 2, 4]
+    assert visits.get_column("service_start").to_list() == [0, 3, 6]
+    assert visits.get_column("service_end").to_list() == [3, 6, 9]
