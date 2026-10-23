@@ -12,6 +12,9 @@ import numpy as np
 import polars as pl
 from scipy.stats import t
 
+from flowsim import __version__
+from flowsim.validation import number
+
 if TYPE_CHECKING:
     import networkx as nx
     from plotly.graph_objects import Figure
@@ -304,8 +307,6 @@ def metric_units(metric: str, time_unit: str) -> str:
 
 
 def confidence_level(value: float) -> float:
-    from flowsim.model import number
-
     level = number(
         value=value,
         label="Confidence level",
@@ -362,8 +363,6 @@ def _run_settings(run: Results) -> tuple:
 
 def _write_metadata(path: str | Path, data: dict) -> None:
     """Write export metadata as JSON, stamped with the FlowSim version."""
-    from flowsim import __version__
-
     write_text(path, json.dumps({"flowsim_version": __version__, **data}, indent=2))
 
 
@@ -653,6 +652,8 @@ class Results:
             },
         )
 
+    # plots imports METRICS from this module at load time, so each plot
+    # method imports its function when called.
     def queue_plot(self) -> Figure:
         from flowsim.plots import queue_plot
 

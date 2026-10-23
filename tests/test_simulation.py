@@ -1,9 +1,11 @@
 """Independent timing and accounting checks for the teaching interface."""
 
+import ast
 import heapq
 import json
 import zlib
 from dataclasses import fields
+from pathlib import Path
 
 import networkx as nx
 import numpy as np
@@ -11,7 +13,8 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from flowsim import Model, results
+import flowsim
+from flowsim import Model, results, validation
 from tests.models import (
     branching_service,
     deterministic_queue,
@@ -1043,3 +1046,42 @@ def test_station_areas_clip_to_the_window_and_skip_empty_spans():
     assert station["service_starts"] == 2
     assert station["service_completions"] == 3
     assert station["waiting_at_close"] == station["occupied_at_close"] == 0
+
+
+def test_validation_helpers_by_hand():
+    rng = np.random.default_rng(0)
+    assert validation.number(2, "Time") == 2.0
+    assert validation.integer(np.int64(3), "Count") == 3
+    assert validation.sample(lambda rng: 1.5, rng, "Service time") == 1.5
+    assert validation.sample(0, rng, "Repair time") == 0.0
+    with pytest.raises(ValueError, match="greater than zero"):
+        validation.sample(0, rng, "Interarrival time", positive=True)
+    with pytest.raises(ValueError, match="at least 1"):
+        validation.integer(True, "Count")
+    with pytest.raises(ValueError, match="finite and at least zero"):
+        validation.number(-1, "Time")
+
+
+def test_imports_sit_at_module_level_except_the_plot_methods():
+    # results.py and plots.py import each other, so Results imports its plot
+    # functions when a plot method runs. No other function imports a module.
+    package = Path(flowsim.__file__).parent
+    local = []
+    for path in sorted(package.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for function in ast.walk(tree):
+            if isinstance(function, ast.FunctionDef):
+                for node in ast.walk(function):
+                    if isinstance(node, ast.ImportFrom):
+                        local.append((path.name, node.module))
+                    elif isinstance(node, ast.Import):
+                        local.extend((path.name, alias.name) for alias in node.names)
+    assert local == [("results.py", "flowsim.plots")] * 6
+    tree = ast.parse((package / "validation.py").read_text(encoding="utf-8"))
+    imported = [
+        node.module if isinstance(node, ast.ImportFrom) else alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    ]
+    assert not any(name.startswith("flowsim") for name in imported)

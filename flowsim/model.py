@@ -3,56 +3,23 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from numbers import Integral, Real
+from numbers import Real
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import networkx as nx
 import numpy as np
 
+from flowsim.engine import simulate
+from flowsim.plots import network_diagram
+from flowsim.results import Experiment, Results
+from flowsim.schedules import validate_schedule
+from flowsim.validation import Duration, integer, number
+
 if TYPE_CHECKING:
     from plotly.graph_objects import Figure
-
-    from flowsim.results import Experiment, Results
-
-Sampler = Callable[[np.random.Generator], float]
-Duration = Real | Sampler
-
-
-def number(value: object, label: str, *, positive: bool = False) -> float:
-    """Require a finite scalar duration, in the model's time unit."""
-    if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
-        raise ValueError(f"{label} must be a finite number, not {value!r}.")
-    result = float(value)
-    if not math.isfinite(result) or result < 0 or (positive and result == 0):
-        comparison = "greater than zero" if positive else "at least zero"
-        raise ValueError(f"{label} must be finite and {comparison}, not {value!r}.")
-    return result
-
-
-def integer(value: object, label: str, *, minimum: int = 1) -> int:
-    if isinstance(value, (bool, np.bool_)) or not isinstance(value, Integral):
-        raise ValueError(f"{label} must be an integer of at least {minimum}.")
-    if value < minimum:
-        raise ValueError(f"{label} must be an integer of at least {minimum}.")
-    return int(value)
-
-
-def sample(
-    distribution: Duration,
-    rng: np.random.Generator,
-    label: str,
-    *,
-    positive: bool = False,
-) -> float:
-    value = distribution(rng) if callable(distribution) else distribution
-    return number(
-        value=value,
-        label=label,
-        positive=positive,
-    )
 
 
 @dataclass(
@@ -128,8 +95,6 @@ class Model:
         rates: Sequence[tuple[float, float]] | None = None,
     ) -> Node:
         """Create arrivals, with the first arrival sampled unless specified."""
-        from flowsim.schedules import validate_schedule
-
         if (interarrival is None) == (rates is None):
             raise ValueError("Provide either interarrival or rates, but not both.")
         arrival_rates = None
@@ -184,8 +149,6 @@ class Model:
         failure_clock: str | None = None,
     ) -> Node:
         """Create servers, with optional schedules, waiting limits, and failures."""
-        from flowsim.schedules import validate_schedule
-
         count = integer(capacity, "Station capacity")
         if not callable(service_time):
             number(service_time, "Service time")
@@ -338,8 +301,6 @@ class Model:
                 raise ValueError(f"{node.name!r} needs a route to the exit.")
 
     def diagram(self) -> Figure:
-        from flowsim.plots import network_diagram
-
         self.validate()
         return network_diagram(self)
 
@@ -352,8 +313,6 @@ class Model:
         drain: bool = False,
     ) -> Results:
         """Close arrivals at duration, optionally serving everyone to completion."""
-        from flowsim.engine import simulate
-
         self.validate()
         horizon = number(
             value=duration,
@@ -387,8 +346,6 @@ class Model:
         drain: bool = False,
     ) -> Experiment:
         """Run independent replications and retain each run's raw results."""
-        from flowsim.results import Experiment
-
         count = integer(
             value=replications,
             label="Replications",

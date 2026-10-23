@@ -13,6 +13,7 @@ import polars as pl
 from plotly.offline import get_plotlyjs
 
 from flowsim.results import METRICS
+from flowsim.validation import integer
 
 if TYPE_CHECKING:
     from flowsim.model import Model
@@ -304,8 +305,6 @@ def resource_plot(result: Results) -> go.Figure:
 
 
 def customer_plot(result: Results, customer_id: int) -> go.Figure:
-    from flowsim.model import integer
-
     identifier = integer(customer_id, "Customer ID")
     rows = result.customers.filter(pl.col("customer_id") == identifier).to_dicts()
     if not rows:

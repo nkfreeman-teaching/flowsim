@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from flowsim.model import Node, sample
 from flowsim.results import (
     Phase,
     Status,
@@ -20,9 +19,11 @@ from flowsim.results import (
     _Visit,
 )
 from flowsim.scheduler import SHIFT_PRIORITY, Event
+from flowsim.validation import sample
 
 if TYPE_CHECKING:
     from flowsim.engine import _Run
+    from flowsim.model import Node
 
 # A customer held by a server takes its status from the server's phase.
 PHASE_STATUS = {

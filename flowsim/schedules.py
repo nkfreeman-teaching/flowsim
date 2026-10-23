@@ -7,7 +7,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from flowsim.model import integer, number
+from flowsim.validation import integer, number
 
 Points = tuple[tuple[float, float], ...]
 

@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from flowsim.model import Node, sample
 from flowsim.results import (
+    Results,
     Status,
     _Activity,
     _Customer,
@@ -20,10 +20,10 @@ from flowsim.results import (
 from flowsim.scheduler import Event, Scheduler
 from flowsim.schedules import next_arrival
 from flowsim.station import _Station
+from flowsim.validation import sample
 
 if TYPE_CHECKING:
-    from flowsim.model import Model
-    from flowsim.results import Results
+    from flowsim.model import Model, Node
 
 # The scheduler processes events at equal times by priority, then in the order
 # they were queued. Shift changes come first (the scheduler's SHIFT_PRIORITY, 1).
@@ -299,8 +299,6 @@ class _Run:
             self.finished.succeed()
 
     def execute(self) -> Results:
-        from flowsim.results import Results
-
         for node in self.model.nodes.values():
             if node.kind == "source":
                 self.scheduler.process(self.source(node))
