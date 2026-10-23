@@ -210,13 +210,13 @@ tolerance of 1e-12.
 | 4.2 | Replace status and phase strings with `StrEnum` | `engine.py`, `station.py`, `results.py` | Sonnet | done (83520a1) |
 | 4.3 | Split `Node.duration` into interarrival and service time, and name the stream pair | `model.py`, `engine.py`, `station.py` | Opus, Sonnet | done (0cadea6) |
 | 4.4 | Add read-only `Model` accessors and precompute routing once per run | `model.py`, `engine.py`, `plots.py`, tests | Opus, Sonnet | done (524aac6) |
-| 4.5 | Move `number`, `integer`, `sample` to a leaf module and hoist local imports | new `flowsim/validation.py`, all modules | Sonnet | done |
+| 4.5 | Move `number`, `integer`, `sample` to a leaf module and hoist local imports | new `flowsim/validation.py`, all modules | Sonnet | done (5ec0289) |
 | 4.6 | Document `_Station` and `_Server`, and share one future-staffing helper | `station.py:154-348` | Sonnet, suite | done (509a466) |
 | 4.7 | Remove the unreachable "arriving" status | `engine.py:155` | Opus, Sonnet | done (e9c726d) |
 | 4.8 | Drop the redundant limit clause in the source loop | `engine.py:129-139` | Sonnet | done (6d905bc) |
 | 4.9 | Compute station state in one pass, and count outside tickets with a counter | `station.py:193-204` | Opus, Codex | done (3e81927) |
 | 4.10 | Compute time-weighted station areas in polars and split the count metrics out | `results.py:246-354` | Opus, Sonnet | done (060c358) |
-| 4.11 | Expand calls to the keyword layout rule in touched files | all touched files | Codex | open |
+| 4.11 | Expand calls to the keyword layout rule in touched files | all touched files | Codex | done |
 
 Notes. For 4.1, a polars frame silently nulls a misspelled key (Opus checked: a row with `exit_tme`
 gave `exit_time == [None]` with no error), so the dataclasses and a field-equals-schema test close
@@ -237,6 +237,10 @@ matters for a classroom day, so this item is for clarity first. For 4.10, the po
 `mean_wait`, whose grouped mean sums in a different order), with every other value identical. For 4.11, the rule is the owner's
 global one: a call with three or more arguments, or two or more keywords, goes one keyword argument
 per line with a trailing comma (e.g., `Metric("system", "Mean total waiting time", "time")`).
+Done for the nine Python files Block 4 touched. Polars `select`, `with_columns`, and `agg` calls take
+their expressions positionally, one per line. Files Block 4 did not touch (`comparison.py`,
+`scheduler.py`, `tests/models.py`, `tests/test_scheduler.py`, and `tests/test_service_day.py`) still
+have 24 calls outside the rule.
 
 ## Block 5: plots, viewer, docs, and examples
 

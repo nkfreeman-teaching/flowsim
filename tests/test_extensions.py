@@ -676,7 +676,10 @@ def test_failed_off_shift_server_can_finish_its_existing_job_after_repair():
         time_to_failure=2,
         repair_time=3,
         failure_clock="busy",
-    ).run(duration=0.5, drain=True)
+    ).run(
+        duration=0.5,
+        drain=True,
+    )
     assert result.customers.height == 1
     assert result.customers.get_column("exit_time").to_list() == [6]
 
@@ -903,4 +906,8 @@ def test_paused_server_needs_a_later_level_that_covers_it(returning):
     assert result.visits.get_column("service_end").to_list() == [4, 6]
     assert result.end_time == 6
     paused = result.activities.filter(pl.col("state") == "paused")
-    assert paused.select("server_id", "start", "end").rows() == [(2, 1.0, 3.0)]
+    assert paused.select(
+        "server_id",
+        "start",
+        "end",
+    ).rows() == [(2, 1.0, 3.0)]

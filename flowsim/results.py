@@ -250,44 +250,130 @@ class Metric:
 
 
 METRICS = {
-    "mean_total_wait": Metric("system", "Mean total waiting time", "time"),
-    "mean_flow_time": Metric("system", "Mean flow time", "time"),
-    "throughput": Metric("system", "Throughput during operating hours", "rate"),
-    "remaining_at_close": Metric("system", "Customers present at closing", "customers"),
-    "completed_at_close": Metric(
-        "system", "Customers completed before closing", "customers"
+    "mean_total_wait": Metric(
+        scope="system",
+        label="Mean total waiting time",
+        kind="time",
     ),
-    "remaining": Metric("system", "Customers unfinished at the end", "customers"),
-    "overtime": Metric("system", "Time to finish after closing", "time"),
-    "mean_wip": Metric("system", "Time-average customers in the system", "customers"),
-    "rejected": Metric("system", "Rejected arrivals", "customers"),
-    "admitted": Metric("system", "Admitted customers", "customers"),
+    "mean_flow_time": Metric(
+        scope="system",
+        label="Mean flow time",
+        kind="time",
+    ),
+    "throughput": Metric(
+        scope="system",
+        label="Throughput during operating hours",
+        kind="rate",
+    ),
+    "remaining_at_close": Metric(
+        scope="system",
+        label="Customers present at closing",
+        kind="customers",
+    ),
+    "completed_at_close": Metric(
+        scope="system",
+        label="Customers completed before closing",
+        kind="customers",
+    ),
+    "remaining": Metric(
+        scope="system",
+        label="Customers unfinished at the end",
+        kind="customers",
+    ),
+    "overtime": Metric(
+        scope="system",
+        label="Time to finish after closing",
+        kind="time",
+    ),
+    "mean_wip": Metric(
+        scope="system",
+        label="Time-average customers in the system",
+        kind="customers",
+    ),
+    "rejected": Metric(
+        scope="system",
+        label="Rejected arrivals",
+        kind="customers",
+    ),
+    "admitted": Metric(
+        scope="system",
+        label="Admitted customers",
+        kind="customers",
+    ),
     "measurement_rejected": Metric(
-        "system", "Rejected arrivals after warm-up", "customers"
+        scope="system",
+        label="Rejected arrivals after warm-up",
+        kind="customers",
     ),
     "measurement_admitted": Metric(
-        "system", "Admissions after warm-up, before closing", "customers"
+        scope="system",
+        label="Admissions after warm-up, before closing",
+        kind="customers",
     ),
     "mean_total_blocked": Metric(
-        "system", "Mean time blocked between stations", "time"
+        scope="system",
+        label="Mean time blocked between stations",
+        kind="time",
     ),
-    "mean_outside_wait": Metric("system", "Mean waiting time outside", "time"),
-    "mean_wait": Metric("station", "Mean station waiting time", "time"),
-    "mean_queue": Metric("station", "Time-average customers waiting", "customers"),
-    "utilization": Metric("station", "Occupied / installed capacity", "fraction"),
-    "p95_wait": Metric("station", "95th percentile station waiting time", "time"),
+    "mean_outside_wait": Metric(
+        scope="system",
+        label="Mean waiting time outside",
+        kind="time",
+    ),
+    "mean_wait": Metric(
+        scope="station",
+        label="Mean station waiting time",
+        kind="time",
+    ),
+    "mean_queue": Metric(
+        scope="station",
+        label="Time-average customers waiting",
+        kind="customers",
+    ),
+    "utilization": Metric(
+        scope="station",
+        label="Occupied / installed capacity",
+        kind="fraction",
+    ),
+    "p95_wait": Metric(
+        scope="station",
+        label="95th percentile station waiting time",
+        kind="time",
+    ),
     "processing_utilization": Metric(
-        "station", "Processing / installed capacity", "fraction"
+        scope="station",
+        label="Processing / installed capacity",
+        kind="fraction",
     ),
-    "blocking_fraction": Metric("station", "Blocked / installed capacity", "fraction"),
-    "downtime_fraction": Metric("station", "Down / installed capacity", "fraction"),
+    "blocking_fraction": Metric(
+        scope="station",
+        label="Blocked / installed capacity",
+        kind="fraction",
+    ),
+    "downtime_fraction": Metric(
+        scope="station",
+        label="Down / installed capacity",
+        kind="fraction",
+    ),
     "staffed_utilization": Metric(
-        "station", "Processing / available capacity", "fraction"
+        scope="station",
+        label="Processing / available capacity",
+        kind="fraction",
     ),
-    "mean_scheduled_servers": Metric("station", "Mean scheduled servers", "servers"),
-    "mean_available_servers": Metric("station", "Mean available servers", "servers"),
+    "mean_scheduled_servers": Metric(
+        scope="station",
+        label="Mean scheduled servers",
+        kind="servers",
+    ),
+    "mean_available_servers": Metric(
+        scope="station",
+        label="Mean available servers",
+        kind="servers",
+    ),
     "mean_outside_queue": Metric(
-        "station", "Time-average customers waiting outside", "customers"
+        scope="station",
+        label="Time-average customers waiting outside",
+        kind="customers",
     ),
 }
 SYSTEM_METRICS = [name for name, metric in METRICS.items() if metric.scope == "system"]

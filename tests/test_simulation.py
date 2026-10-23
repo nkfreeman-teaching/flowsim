@@ -234,9 +234,17 @@ def test_node_streams_depend_only_on_the_seed_and_the_node_name():
             )
         )
 
-    arrivals = np.cumsum(stream("Customers").exponential(scale=5, size=40))
+    arrivals = np.cumsum(
+        stream("Customers").exponential(
+            scale=5,
+            size=40,
+        )
+    )
     arrivals = arrivals[arrivals < 100]
-    services = stream("Service").exponential(scale=4, size=len(arrivals))
+    services = stream("Service").exponential(
+        scale=4,
+        size=len(arrivals),
+    )
 
     def build(unrelated: bool) -> Model:
         model = Model()
@@ -1052,10 +1060,29 @@ def test_validation_helpers_by_hand():
     rng = np.random.default_rng(0)
     assert validation.number(2, "Time") == 2.0
     assert validation.integer(np.int64(3), "Count") == 3
-    assert validation.sample(lambda rng: 1.5, rng, "Service time") == 1.5
-    assert validation.sample(0, rng, "Repair time") == 0.0
+    assert (
+        validation.sample(
+            distribution=lambda rng: 1.5,
+            rng=rng,
+            label="Service time",
+        )
+        == 1.5
+    )
+    assert (
+        validation.sample(
+            distribution=0,
+            rng=rng,
+            label="Repair time",
+        )
+        == 0.0
+    )
     with pytest.raises(ValueError, match="greater than zero"):
-        validation.sample(0, rng, "Interarrival time", positive=True)
+        validation.sample(
+            distribution=0,
+            rng=rng,
+            label="Interarrival time",
+            positive=True,
+        )
     with pytest.raises(ValueError, match="at least 1"):
         validation.integer(True, "Count")
     with pytest.raises(ValueError, match="finite and at least zero"):
