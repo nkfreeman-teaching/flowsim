@@ -214,8 +214,8 @@ tolerance of 1e-12.
 | 4.6 | Document `_Station` and `_Server`, and share one future-staffing helper | `station.py:154-348` | Sonnet, suite | done (509a466) |
 | 4.7 | Remove the unreachable "arriving" status | `engine.py:155` | Opus, Sonnet | done (e9c726d) |
 | 4.8 | Drop the redundant limit clause in the source loop | `engine.py:129-139` | Sonnet | done (6d905bc) |
-| 4.9 | Compute station state in one pass, and count outside tickets with a counter | `station.py:193-204` | Opus, Codex | done |
-| 4.10 | Compute time-weighted station areas in polars and split the count metrics out | `results.py:246-354` | Opus, Sonnet | open |
+| 4.9 | Compute station state in one pass, and count outside tickets with a counter | `station.py:193-204` | Opus, Codex | done (3e81927) |
+| 4.10 | Compute time-weighted station areas in polars and split the count metrics out | `results.py:246-354` | Opus, Sonnet | done |
 | 4.11 | Expand calls to the keyword layout rule in touched files | all touched files | Codex | open |
 
 Notes. For 4.1, a polars frame silently nulls a misspelled key (Opus checked: a row with `exit_tme`
@@ -229,7 +229,9 @@ the top), so the lazy plot imports save nothing. For 4.6, `settled_drain_check` 
 complexity 18, and its two searches for future staffing differ only in the level they need. For
 4.9, Opus measured `observe` at 1.96 s of a 5.83 s run (10,000 customers, 5 stations), and the main
 session measured the outside-queue count at 0.26 s for 4,000 customers waiting outside. Neither
-matters for a classroom day, so this item is for clarity first. For 4.11, the rule is the owner's
+matters for a classroom day, so this item is for clarity first. For 4.10, the polars version moved
+223 float cells in ten `stations.csv` files by at most a relative 1.0e-15 (the area ratios, and
+`mean_wait`, whose grouped mean sums in a different order), with every other value identical. For 4.11, the rule is the owner's
 global one: a call with three or more arguments, or two or more keywords, goes one keyword argument
 per line with a trailing comma (e.g., `Metric("system", "Mean total waiting time", "time")`).
 

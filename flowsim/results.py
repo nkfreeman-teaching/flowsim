@@ -72,6 +72,45 @@ FAILURE_SCHEMA = {
     "repair_time": pl.Float64,
     "repair_end": pl.Float64,
 }
+STATION_SCHEMA = {
+    "station": pl.String,
+    "capacity": pl.Int64,
+    "arrivals": pl.Int64,
+    "wait_arrivals": pl.Int64,
+    "service_starts": pl.Int64,
+    "service_completions": pl.Int64,
+    "wait_observations": pl.Int64,
+    "waiting_at_close": pl.Int64,
+    "occupied_at_close": pl.Int64,
+    "waiting_at_end": pl.Int64,
+    "occupied_at_end": pl.Int64,
+    "blocked_at_close": pl.Int64,
+    "paused_at_close": pl.Int64,
+    "outside_at_close": pl.Int64,
+    "mean_wait": pl.Float64,
+    "p95_wait": pl.Float64,
+    "mean_queue": pl.Float64,
+    "max_queue": pl.Int64,
+    "utilization": pl.Float64,
+    "processing_utilization": pl.Float64,
+    "blocking_fraction": pl.Float64,
+    "downtime_fraction": pl.Float64,
+    "mean_scheduled_servers": pl.Float64,
+    "mean_available_servers": pl.Float64,
+    "mean_outside_queue": pl.Float64,
+    "staffed_utilization": pl.Float64,
+}
+# State counts integrated over time for the station table.
+AREA_FIELDS = [
+    "waiting",
+    "busy",
+    "processing",
+    "blocked",
+    "down",
+    "scheduled",
+    "available",
+    "outside",
+]
 
 
 class Status(StrEnum):
@@ -389,113 +428,145 @@ class Results:
         self.stations = self._station_metrics()
         self.summary = self._system_metrics()
 
-    def _station_metrics(self) -> pl.DataFrame:
-        rows = []
-        window = self.duration - self.warmup
-        for name, capacity in self.capacities.items():
-            history = self.states.filter(pl.col("station") == name).to_dicts()
-            queue_area = 0.0
-            busy_area = 0.0
-            areas = {
-                field: 0.0
-                for field in [
-                    "processing",
-                    "blocked",
-                    "down",
-                    "scheduled",
-                    "available",
-                    "outside",
-                ]
-            }
-            max_queue = 0
-            for current, following in zip(history[:-1], history[1:]):
-                width = max(
-                    0.0,
-                    min(following["time"], self.duration)
-                    - max(current["time"], self.warmup),
-                )
-                # Areas have units customer*time and server*time.
-                queue_area += current["waiting"] * width
-                busy_area += current["busy"] * width
-                for field in areas:
-                    areas[field] += current[field] * width
-                if width > 0:
-                    max_queue = max(max_queue, current["waiting"])
-            all_visits = self.visits.filter(pl.col("station") == name)
-            visits = all_visits.filter(pl.col("arrival_time") >= self.warmup)
-            during_hours = visits.filter(pl.col("arrival_time") < self.duration)
-            waits = visits.get_column("wait_time").drop_nulls()
-            rows.append(
-                {
-                    "station": name,
-                    "capacity": capacity,
-                    "arrivals": during_hours.height,
-                    "wait_arrivals": visits.height,
-                    "service_starts": all_visits.filter(
-                        (pl.col("service_start") >= self.warmup)
-                        & (pl.col("service_start") < self.duration)
-                    ).height,
-                    "service_completions": all_visits.filter(
-                        (pl.col("service_end") >= self.warmup)
-                        & (pl.col("service_end") < self.duration)
-                    ).height,
-                    "wait_observations": waits.len(),
-                    "waiting_at_close": self.closing_states[name].waiting,
-                    "occupied_at_close": self.closing_states[name].busy,
-                    "waiting_at_end": history[-1]["waiting"],
-                    "occupied_at_end": history[-1]["busy"],
-                    "blocked_at_close": self.closing_states[name].blocked,
-                    "paused_at_close": self.closing_states[name].paused,
-                    "outside_at_close": self.closing_states[name].outside,
-                    "mean_wait": waits.mean(),
-                    "p95_wait": waits.quantile(0.95, interpolation="linear"),
-                    "mean_queue": queue_area / window,
-                    "max_queue": max_queue,
-                    # Utilization is server*time / (servers*time), dimensionless.
-                    "utilization": busy_area / (capacity * window),
-                    "processing_utilization": areas["processing"] / (capacity * window),
-                    "blocking_fraction": areas["blocked"] / (capacity * window),
-                    "downtime_fraction": areas["down"] / (capacity * window),
-                    "mean_scheduled_servers": areas["scheduled"] / window,
-                    "mean_available_servers": areas["available"] / window,
-                    "mean_outside_queue": areas["outside"] / window,
-                    "staffed_utilization": (
-                        None
-                        if areas["available"] == 0
-                        else areas["processing"] / areas["available"]
-                    ),
-                }
+    def _station_areas(self) -> pl.DataFrame:
+        """Integrate each station's state counts over [warmup, duration).
+
+        A state row holds until the station's next row, so its width is the
+        part of that span inside the window. Areas have units customer*time
+        and server*time. The largest queue counts only rows with positive width.
+        """
+        width = (
+            (
+                pl.col("time").shift(-1).over("station").clip(upper_bound=self.duration)
+                - pl.col("time").clip(lower_bound=self.warmup)
             )
-        return pl.DataFrame(
-            data=rows,
-            schema={
-                "station": pl.String,
-                "capacity": pl.Int64,
-                "arrivals": pl.Int64,
-                "wait_arrivals": pl.Int64,
-                "service_starts": pl.Int64,
-                "service_completions": pl.Int64,
-                "wait_observations": pl.Int64,
-                "waiting_at_close": pl.Int64,
-                "occupied_at_close": pl.Int64,
-                "waiting_at_end": pl.Int64,
-                "occupied_at_end": pl.Int64,
-                "blocked_at_close": pl.Int64,
-                "paused_at_close": pl.Int64,
-                "outside_at_close": pl.Int64,
-                "mean_wait": pl.Float64,
-                "p95_wait": pl.Float64,
-                "mean_queue": pl.Float64,
-                "max_queue": pl.Int64,
-                "utilization": pl.Float64,
-                "processing_utilization": pl.Float64,
-                "blocking_fraction": pl.Float64,
-                "downtime_fraction": pl.Float64,
-                "mean_scheduled_servers": pl.Float64,
-                "mean_available_servers": pl.Float64,
-                "mean_outside_queue": pl.Float64,
-                "staffed_utilization": pl.Float64,
-            },
+            .clip(lower_bound=0)
+            .fill_null(0)
+        )
+        return (
+            self.states.with_columns(width.alias("width"))
+            .group_by(
+                "station",
+                maintain_order=True,
+            )
+            .agg(
+                *[
+                    (pl.col(field) * pl.col("width")).sum().alias(f"{field}_area")
+                    for field in AREA_FIELDS
+                ],
+                pl.col("waiting")
+                .filter(pl.col("width") > 0)
+                .max()
+                .fill_null(0)
+                .alias("max_queue"),
+            )
+        )
+
+    def _station_counts(self) -> pl.DataFrame:
+        """Count each station's visits in the window and its closing states."""
+
+        def in_window(column: str) -> pl.Expr:
+            return pl.col(column).is_between(
+                lower_bound=self.warmup,
+                upper_bound=self.duration,
+                closed="left",
+            )
+
+        # Waits belong to station arrivals at or after warm-up, with no upper
+        # bound, so drained runs include arrivals after closing.
+        cohort = pl.col("arrival_time") >= self.warmup
+        waits = pl.col("wait_time").filter(cohort)
+        visits = self.visits.group_by("station").agg(
+            in_window("arrival_time").sum().alias("arrivals"),
+            cohort.sum().alias("wait_arrivals"),
+            in_window("service_start").sum().alias("service_starts"),
+            in_window("service_end").sum().alias("service_completions"),
+            waits.count().alias("wait_observations"),
+            waits.mean().alias("mean_wait"),
+            waits.quantile(
+                quantile=0.95,
+                interpolation="linear",
+            ).alias("p95_wait"),
+        )
+        closing = _frame(list(self.closing_states.values()), STATE_SCHEMA).select(
+            "station",
+            pl.col("waiting").alias("waiting_at_close"),
+            pl.col("busy").alias("occupied_at_close"),
+            pl.col("blocked").alias("blocked_at_close"),
+            pl.col("paused").alias("paused_at_close"),
+            pl.col("outside").alias("outside_at_close"),
+        )
+        final = self.states.group_by(
+            "station",
+            maintain_order=True,
+        ).agg(
+            pl.col("waiting").last().alias("waiting_at_end"),
+            pl.col("busy").last().alias("occupied_at_end"),
+        )
+        counts = [
+            "arrivals",
+            "wait_arrivals",
+            "service_starts",
+            "service_completions",
+            "wait_observations",
+        ]
+        # A station no customer visited has zero counts and no waits.
+        return (
+            closing.join(
+                other=visits,
+                on="station",
+                how="left",
+                maintain_order="left",
+            )
+            .join(
+                other=final,
+                on="station",
+                how="left",
+                maintain_order="left",
+            )
+            .with_columns(pl.col(counts).fill_null(0))
+        )
+
+    def _station_metrics(self) -> pl.DataFrame:
+        window = self.duration - self.warmup
+        # Utilization is server*time / (servers*time), dimensionless.
+        installed = pl.col("capacity") * window
+        stations = (
+            pl.DataFrame(
+                data={
+                    "station": list(self.capacities),
+                    "capacity": list(self.capacities.values()),
+                },
+                schema={"station": pl.String, "capacity": pl.Int64},
+            )
+            .join(
+                other=self._station_counts(),
+                on="station",
+                how="left",
+                maintain_order="left",
+            )
+            .join(
+                other=self._station_areas(),
+                on="station",
+                how="left",
+                maintain_order="left",
+            )
+        )
+        return stations.with_columns(
+            (pl.col("waiting_area") / window).alias("mean_queue"),
+            (pl.col("busy_area") / installed).alias("utilization"),
+            (pl.col("processing_area") / installed).alias("processing_utilization"),
+            (pl.col("blocked_area") / installed).alias("blocking_fraction"),
+            (pl.col("down_area") / installed).alias("downtime_fraction"),
+            (pl.col("scheduled_area") / window).alias("mean_scheduled_servers"),
+            (pl.col("available_area") / window).alias("mean_available_servers"),
+            (pl.col("outside_area") / window).alias("mean_outside_queue"),
+            pl.when(pl.col("available_area") == 0)
+            .then(None)
+            .otherwise(pl.col("processing_area") / pl.col("available_area"))
+            .alias("staffed_utilization"),
+        ).select(
+            [pl.col(column).cast(dtype) for column, dtype in STATION_SCHEMA.items()]
         )
 
     def _system_metrics(self) -> pl.DataFrame:

@@ -12,7 +12,12 @@ import pytest
 from polars.testing import assert_frame_equal
 
 from flowsim import Model, results
-from tests.models import branching_service, deterministic_queue, service_network
+from tests.models import (
+    branching_service,
+    deterministic_queue,
+    service_network,
+    single_station,
+)
 
 
 def test_hand_calculated_queue():
@@ -1008,3 +1013,33 @@ def test_outside_count_excludes_blocked_transfers():
         (1, 3.5),
         (3, 6.5),
     ]
+
+
+def test_station_areas_clip_to_the_window_and_skip_empty_spans():
+    # By hand: arrivals at 0, 1, and 2 need 3 units each, with warm-up 3 and
+    # closing at 10. The queue of 2 from 2 to 3 lies before warm-up, so the
+    # largest observed queue is 1. In [3, 10), one customer waits from 3 to 6
+    # (area 3) and the server is busy from 3 to 9 (area 6). Starts at 3 and 6
+    # and ends at 3, 6, and 9 fall in the window, and no station arrival does.
+    station = (
+        single_station()
+        .run(
+            duration=10,
+            warmup=3,
+        )
+        .stations.to_dicts()[0]
+    )
+    assert station["mean_queue"] == pytest.approx(3 / 7, rel=1e-12)
+    assert station["utilization"] == pytest.approx(6 / 7, rel=1e-12)
+    assert station["processing_utilization"] == pytest.approx(6 / 7, rel=1e-12)
+    assert station["staffed_utilization"] == pytest.approx(6 / 7, rel=1e-12)
+    assert station["mean_scheduled_servers"] == 1
+    assert station["mean_available_servers"] == 1
+    assert station["blocking_fraction"] == station["downtime_fraction"] == 0
+    assert station["max_queue"] == 1
+    assert station["arrivals"] == station["wait_arrivals"] == 0
+    assert station["wait_observations"] == 0
+    assert station["mean_wait"] is None
+    assert station["service_starts"] == 2
+    assert station["service_completions"] == 3
+    assert station["waiting_at_close"] == station["occupied_at_close"] == 0
