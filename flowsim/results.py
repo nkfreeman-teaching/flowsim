@@ -99,6 +99,12 @@ METRICS = {
     "mean_wip": Metric("system", "Time-average customers in the system", "customers"),
     "rejected": Metric("system", "Rejected arrivals", "customers"),
     "admitted": Metric("system", "Admitted customers", "customers"),
+    "measurement_rejected": Metric(
+        "system", "Rejected arrivals after warm-up", "customers"
+    ),
+    "measurement_admitted": Metric(
+        "system", "Admissions after warm-up, before closing", "customers"
+    ),
     "mean_total_blocked": Metric(
         "system", "Mean time blocked between stations", "time"
     ),
@@ -403,6 +409,20 @@ class Results:
                 "overtime": [self.end_time - self.duration],
                 "measurement_arrivals": [
                     self.customers.filter(pl.col("arrival_time") >= self.warmup).height
+                ],
+                # A rejection happens at arrival, so both counts use the event's
+                # own time in [warmup, duration), as measurement_completions does.
+                "measurement_rejected": [
+                    self.customers.filter(
+                        (pl.col("status") == "rejected")
+                        & (pl.col("arrival_time") >= self.warmup)
+                    ).height
+                ],
+                "measurement_admitted": [
+                    inside.filter(
+                        (pl.col("admission_time") >= self.warmup)
+                        & (pl.col("admission_time") < self.duration)
+                    ).height
                 ],
                 "cohort_arrivals": [cohort.height],
                 "measurement_completions": [exits],

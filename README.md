@@ -283,6 +283,10 @@ wait in one admission line, and the station admits them in the order they asked
 to enter. `arrivals` counts attempts, with
 `arrivals = completed + remaining + rejected`. `admitted` counts successful
 admissions to the network, and `admitted_at_close` excludes later admissions.
+`measurement_rejected` and `measurement_admitted` count only rejections and
+admissions whose times fall in the measurement window `[warmup, duration)`, so
+an outside customer who arrived before warm-up and entered after it counts in
+`measurement_admitted`.
 `remaining_at_close` includes unfinished outside customers, and
 `outside_at_close` reports them separately. Wait and flow averages exclude
 rejections. Outside waiting adds to `total_wait`, blocking is reported
@@ -480,8 +484,10 @@ accept. System metrics come from `summary`, and station metrics come from
 | `remaining` | System | Customers unfinished at the end |
 | `overtime` | System | Time to finish after closing |
 | `mean_wip` | System | Time-average customers in the system |
-| `rejected` | System | Rejected arrivals |
-| `admitted` | System | Admitted customers |
+| `rejected` | System | Rejected arrivals over the whole run |
+| `admitted` | System | Admitted customers over the whole run, including admissions after closing |
+| `measurement_rejected` | System | Rejected arrivals in `[warmup, duration)` |
+| `measurement_admitted` | System | Admissions in `[warmup, duration)` |
 | `mean_total_blocked` | System | Mean time blocked between stations |
 | `mean_outside_wait` | System | Mean waiting time outside the first station |
 | `mean_wait` | Station | Mean station waiting time |

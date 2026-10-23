@@ -255,6 +255,38 @@ def test_external_waiting_is_separate_from_inside_queue_and_wip():
     assert result.stations.to_dicts()[0]["mean_outside_queue"] == 1
 
 
+def test_measurement_rejections_and_admissions_use_the_window():
+    # Arrivals at 0, 1, 2 need three time units each. Customer 1 is admitted at
+    # 0, and customers 2 and 3 are rejected at 1 and 2, all before warm-up at
+    # 2.5, so the whole-run counts are 1 and 2 and the window counts are zero.
+    rejecting = single_station(
+        buffer=0,
+        external_overflow="reject",
+    ).run(
+        duration=4,
+        warmup=2.5,
+        drain=True,
+    )
+    totals = rejecting.summary.to_dicts()[0]
+    assert (totals["admitted"], totals["rejected"]) == (1, 2)
+    assert totals["measurement_arrivals"] == 0
+    assert (totals["measurement_admitted"], totals["measurement_rejected"]) == (0, 0)
+    # With an outside line, admissions are at 0, 3, and 6. Only the one at 3 is
+    # in [2.5, 4), although customer 2 arrived at 1, before warm-up.
+    waiting = single_station(
+        buffer=0,
+        external_overflow="wait",
+    ).run(
+        duration=4,
+        warmup=2.5,
+        drain=True,
+    )
+    totals = waiting.summary.to_dicts()[0]
+    assert waiting.customers.get_column("admission_time").to_list() == [0, 3, 6]
+    assert (totals["admitted"], totals["admitted_at_close"]) == (3, 2)
+    assert (totals["measurement_admitted"], totals["measurement_rejected"]) == (1, 0)
+
+
 def test_shift_start_precedes_an_arrival_at_the_same_time():
     # The server starts at 5 and the only customer arrives at 5. With no
     # waiting room, the customer is served only if the shift change runs first.
