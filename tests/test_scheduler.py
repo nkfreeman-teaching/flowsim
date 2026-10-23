@@ -190,7 +190,10 @@ def test_interrupts_stop_the_run_at_once():
 def test_model_error_after_the_last_event_is_not_raised():
     # The machine fails at 1 and is repaired at 2. Closing at 2 queues the
     # finished event before the repair asks for its next lifetime.
-    result = breaks_after_first_repair().run(duration=2, drain=True)
+    result = breaks_after_first_repair().run(
+        duration=2,
+        drain=True,
+    )
     assert result.failures.get_column("failure_time").to_list() == [1]
     assert result.failures.get_column("repair_end").to_list() == [2]
     assert result.end_time == 2

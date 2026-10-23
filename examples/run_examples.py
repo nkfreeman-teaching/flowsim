@@ -69,7 +69,14 @@ def main():
     staffing = pl.concat(comparison)
     staffing.write_csv(output / "staffing-comparison.csv")
     print("\nMean wait at the Service station across 12 replications")
-    print(staffing.select("servers", "mean", "lower", "upper"))
+    print(
+        staffing.select(
+            "servers",
+            "mean",
+            "lower",
+            "upper",
+        )
+    )
     print(f"\nViewers and raw records were written to {output.resolve()}.")
 
 

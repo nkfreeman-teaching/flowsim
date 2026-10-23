@@ -38,7 +38,11 @@ class Event:
     def succeed(self) -> None:
         if self.triggered:
             raise RuntimeError("An event can succeed only once.")
-        self.scheduler.schedule(self, NORMAL, 0)
+        self.scheduler.schedule(
+            event=self,
+            priority=NORMAL,
+            delay=0,
+        )
 
 
 class AnyOf(Event):
@@ -79,7 +83,11 @@ class _Process:
         self.generator = generator
         start = Event(scheduler)
         start.callbacks = [self.resume]
-        scheduler.schedule(start, URGENT, 0)
+        scheduler.schedule(
+            event=start,
+            priority=URGENT,
+            delay=0,
+        )
 
     def resume(self, event: Event) -> None:
         while True:
@@ -94,7 +102,11 @@ class _Process:
                 # SystemExit stop the run at once, by the owner's choice.
                 failure = Event(self.scheduler)
                 failure.callbacks = [partial(_raise, error)]
-                self.scheduler.schedule(failure, NORMAL, 0)
+                self.scheduler.schedule(
+                    event=failure,
+                    priority=NORMAL,
+                    delay=0,
+                )
                 return
             if event.callbacks is not None:
                 event.callbacks.append(self.resume)
@@ -128,7 +140,11 @@ class Scheduler:
         if delay < 0:
             raise ValueError(f"Negative delay {delay!r}.")
         event = Event(self)
-        self.schedule(event, priority, delay)
+        self.schedule(
+            event=event,
+            priority=priority,
+            delay=delay,
+        )
         return event
 
     def any_of(self, events: list[Event]) -> AnyOf:
@@ -158,7 +174,11 @@ class Scheduler:
                 raise ValueError(f"Cannot run until {until!r} from {self.now!r}.")
             stop = Event(self)
             stop.callbacks = [_stop]
-            self.schedule(stop, URGENT, until - self.now)
+            self.schedule(
+                event=stop,
+                priority=URGENT,
+                delay=until - self.now,
+            )
         try:
             while self.queue:
                 self.step()
