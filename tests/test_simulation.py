@@ -52,7 +52,7 @@ def test_censoring_retains_waiting_and_in_service_customers():
     assert result.customers.get_column("flow_time").to_list() == [2, None, None]
     station = result.stations.to_dicts()[0]
     assert station["mean_wait"] == 0.5
-    assert station["waiting_at_end"] == station["in_service_at_end"] == 1
+    assert station["waiting_at_end"] == station["occupied_at_end"] == 1
     assert station["mean_queue"] == pytest.approx(2 / 3)
     assert station["utilization"] == 1
     assert result.summary.to_dicts()[0]["mean_wip"] == pytest.approx(5 / 3)
@@ -78,7 +78,7 @@ def test_warmup_clips_intervals_crossing_the_boundary():
     assert station["mean_wait"] == 2
     assert station["mean_queue"] == pytest.approx(2.5 / 4)
     assert station["utilization"] == 1
-    assert station["in_service_at_end"] == 1
+    assert station["occupied_at_end"] == 1
     summary = result.summary.to_dicts()[0]
     assert summary["measurement_arrivals"] == 1
     assert summary["measurement_completions"] == 2
@@ -95,7 +95,7 @@ def test_pre_warmup_customer_still_counts_at_end():
     station = result.stations.to_dicts()[0]
     assert station["arrivals"] == 0
     assert station["waiting_at_end"] == 1
-    assert station["in_service_at_end"] == 1
+    assert station["occupied_at_end"] == 1
     assert station["mean_wait"] is None
     assert station["mean_queue"] == 1
     assert station["utilization"] == 1

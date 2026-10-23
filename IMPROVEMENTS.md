@@ -113,8 +113,8 @@ so 12 cases pass on the wrong error. Add the expected message fragment to each c
 | # | Change | Where | Found by | Outputs | Status |
 |---|---|---|---|---|---|
 | 2.1 | Key random streams by node name | `flowsim/engine.py:50-61`, README | Opus, Sonnet | Every seeded run, once | done (059b99b) |
-| 2.2 | List stations in model definition order | `flowsim/engine.py:62-72` | Sonnet | Row order | done |
-| 2.3 | Rename `in_service_*` to `occupied_*` and relabel plots | `results.py:299-301`, `plots.py:132`, `viewer.html`, README | Opus, Sonnet | Column names | open |
+| 2.2 | List stations in model definition order | `flowsim/engine.py:62-72` | Sonnet | Row order | done (2366073) |
+| 2.3 | Rename `in_service_*` to `occupied_*` and relabel plots | `results.py:299-301`, `plots.py:132`, `viewer.html`, README | Opus, Sonnet | Column names | done |
 | 2.4 | Add `measurement_rejected` and `measurement_admitted` | `results.py:356-424`, `METRICS`, README | Opus | New columns | open |
 | 2.5 | Add two station columns missing from `METRICS` | `results.py:89-119`, README | Opus | Accepts two metrics | open |
 | 2.6 | Remove the unused paused-area accumulator | `results.py:253-276` | Codex | None | open |

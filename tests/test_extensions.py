@@ -419,6 +419,54 @@ def test_blocking_holds_upstream_machine_until_downstream_admission():
     assert result.summary.to_dicts()[0]["mean_wip"] == 2
 
 
+def test_occupied_servers_at_close_include_blocked_jobs():
+    # Customer 1 is served upstream over [0, 1] and downstream over [1, 4].
+    # Customer 2 finishes upstream at 2 and stays blocked there, and customer 3
+    # waits upstream from 2. At closing (3), the upstream server is occupied by
+    # a blocked job, and the downstream server is occupied by a processing job.
+    model = Model()
+    source = model.source(
+        name="Customers",
+        interarrival=1,
+        first_arrival=0,
+        limit=3,
+    )
+    upstream = model.station(
+        name="Upstream",
+        capacity=1,
+        service_time=1,
+    )
+    downstream = model.station(
+        name="Downstream",
+        capacity=1,
+        service_time=3,
+        buffer=0,
+        external_overflow="reject",
+    )
+    model.route([source, upstream, downstream, model.exit])
+    result = model.run(duration=3)
+    closing = result.stations.select(
+        "station",
+        "waiting_at_close",
+        "occupied_at_close",
+        "blocked_at_close",
+    ).to_dicts()
+    assert closing == [
+        {
+            "station": "Upstream",
+            "waiting_at_close": 1,
+            "occupied_at_close": 1,
+            "blocked_at_close": 1,
+        },
+        {
+            "station": "Downstream",
+            "waiting_at_close": 0,
+            "occupied_at_close": 1,
+            "blocked_at_close": 0,
+        },
+    ]
+
+
 def test_resume_after_repairs_has_an_independent_clock_calculation():
     model = Model()
     source = model.source(

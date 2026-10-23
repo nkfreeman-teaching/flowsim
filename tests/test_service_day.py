@@ -35,8 +35,8 @@ def test_drain_finishes_the_arrival_cohort_and_preserves_opening_metrics():
     for metric in ["throughput", "mean_wip", "measurement_completions"]:
         assert summary[metric] == stopped.summary.to_dicts()[0][metric]
     station = drained.stations.to_dicts()[0]
-    assert station["waiting_at_close"] == station["in_service_at_close"] == 1
-    assert station["waiting_at_end"] == station["in_service_at_end"] == 0
+    assert station["waiting_at_close"] == station["occupied_at_close"] == 1
+    assert station["waiting_at_end"] == station["occupied_at_end"] == 0
     for metric in ["mean_queue", "max_queue", "utilization"]:
         assert station[metric] == stopped.stations.to_dicts()[0][metric]
 
@@ -52,7 +52,7 @@ def test_completions_exactly_at_closing_are_processed_only_when_draining():
     assert summary["completed_at_close"] == summary["measurement_completions"] == 0
     assert summary["remaining_at_close"] == summary["after_close_completions"] == 2
     station = result.stations.to_dicts()[0]
-    assert station["waiting_at_close"] == station["in_service_at_close"] == 1
+    assert station["waiting_at_close"] == station["occupied_at_close"] == 1
     assert station["mean_queue"] == 0.5
     assert station["utilization"] == 1
 

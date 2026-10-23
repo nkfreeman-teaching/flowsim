@@ -350,9 +350,11 @@ overtime. `warmup=60` keeps the full trace and measures station states over
 use each event's time in that window. `completed_at_close` and
 `remaining_at_close` describe the backlog at closing, while `completed` and
 `remaining` describe the final records after any continuation. Station closing
-counts are `waiting_at_close` and `in_service_at_close`, and final station counts
-are `waiting_at_end` and `in_service_at_end`. Closing and final counts include
-customers who arrived before warm-up.
+counts are `waiting_at_close` and `occupied_at_close`, and final station counts
+are `waiting_at_end` and `occupied_at_end`. An occupied server holds a job that
+is processing, paused, or blocked, so `occupied_at_close` includes the servers
+that `blocked_at_close` and `paused_at_close` count. Closing and final counts
+include customers who arrived before warm-up.
 
 Mean and 95th percentile waiting times use station arrivals at or after warm-up
 whose service starts were observed, including visits to downstream stations

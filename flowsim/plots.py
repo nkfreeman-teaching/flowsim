@@ -129,7 +129,7 @@ def queue_plot(result: Results) -> go.Figure:
         history = result.states.filter(pl.col("station") == station)
         for field, color, name in [
             ("waiting", BLUE, "Waiting"),
-            ("busy", ORANGE, "In service"),
+            ("busy", ORANGE, "Occupied servers"),
         ]:
             figure.add_trace(
                 go.Scatter(
