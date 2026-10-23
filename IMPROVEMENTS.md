@@ -246,8 +246,8 @@ have 24 calls outside the rule.
 
 | # | Change | Where | Found by | Status |
 |---|---|---|---|---|
-| 5.1 | Select viewer traces by station metadata instead of fixed counts | `plots.py:126-303`, `viewer.html:214-221` | All three | done |
-| 5.2 | Build each customer timeline once, in Python | `plots.py:306-375`, `viewer.html:223-275` | Opus, Sonnet | open |
+| 5.1 | Select viewer traces by station metadata instead of fixed counts | `plots.py:126-303`, `viewer.html:214-221` | All three | done (89491f4) |
+| 5.2 | Build each customer timeline once, in Python | `plots.py:306-375`, `viewer.html:223-275` | Opus, Sonnet | done |
 | 5.3 | Move the comparison page to a template file | `comparison.py:276-335` | Sonnet | open |
 | 5.4 | Fix README and message drift | README, `model.py:24`, `:259`, `:301` | Opus, Sonnet | open |
 | 5.5 | Derive example labels and constants from one place | `examples/`, `tests/test_examples.py:40` | Opus, Sonnet | open |
@@ -263,7 +263,10 @@ activity rows (`viewer.html:250-255`), but `customer_plot` draws nothing, so the
 zero-length service. Add one Python function that returns timeline spans, use it in
 `customer_plot`, and embed the spans in the viewer payload so the JS only draws them. Also rename
 the loop variable `label` at `plots.py:323`, which hides the module's `label()` function.
-Adjudicated: Opus's single-source design over Sonnet's keep-both-plus-parity-test.
+Adjudicated: Opus's single-source design over Sonnet's keep-both-plus-parity-test. Done as
+`plots.timeline_spans`, which keeps the Python rule: zero-length service writes no activity row and
+draws no bar (the JS fallback drew a zero-width bar, which looked the same). The spans replace the
+payload's activity rows, and the two-stage viewer grew from 5,094,735 to 5,129,712 bytes.
 
 **5.3.** `Comparison.viewer` builds a 30-line f-string page with its own CSS, while `Results.viewer`
 uses `flowsim/viewer.html`. Move it to `flowsim/comparison.html` using the same placeholder scheme,

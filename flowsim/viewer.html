@@ -121,15 +121,10 @@
 <script>
   const result = JSON.parse(document.getElementById("result-data").textContent);
   const byId = new Map(result.customers.map(row => [row.customer_id, row]));
-  const activitiesById = new Map();
-  result.activities.forEach(row => {
-    if (!activitiesById.has(row.customer_id)) activitiesById.set(row.customer_id, []);
-    activitiesById.get(row.customer_id).push(row);
-  });
-  const visitsById = new Map();
-  result.visits.forEach(row => {
-    if (!visitsById.has(row.customer_id)) visitsById.set(row.customer_id, []);
-    visitsById.get(row.customer_id).push(row);
+  const spansById = new Map();
+  result.timeline.forEach(row => {
+    if (!spansById.has(row.customer_id)) spansById.set(row.customer_id, []);
+    spansById.get(row.customer_id).push(row);
   });
   const config = {responsive: true, displaylogo: false};
   const unit = result.time_unit;
@@ -232,32 +227,14 @@
       (customer.status === "rejected" ? "The customer did not enter the service network." :
        customer.exit_time === null ? "Unfinished activity is shown through the service limit." :
         "Flow time: " + format(customer.flow_time) + " " + unit + ".");
-    const visits = visitsById.get(id) || [];
-    const activities = activitiesById.get(id) || [];
-    const definitions = [
-      ["Waiting", "#0072B2", "arrival_time", "service_start", null],
-      ["In service", "#D55E00", "service_start", "service_end", "processing"],
-      ["Paused", "#CC79A7", "start", "end", "paused"],
-      ["Blocked", "#009E73", "start", "end", "blocked"],
-      ["Outside", "#667085", "arrival_time", "admission_time", "outside"]
-    ];
-    const traces = definitions.map(([name, color, startKey, endKey, state]) => {
-      let selected;
-      if (state === "outside") {
-        selected = customer.status !== "rejected" && (customer.outside_wait > 0 || customer.status === "outside") ?
-          [Object.assign({}, customer, {station: "Outside"})] : [];
-      } else if (activities.length && state !== null) {
-        selected = activities.filter(row => row.state === state);
-        startKey = "start"; endKey = "end";
-      } else if (state === null || state === "processing") {
-        selected = visits.filter(row => row[startKey] !== null);
-      } else {
-        selected = [];
-      }
+    // plots.timeline_spans computes these bars, so this only draws them.
+    const spans = spansById.get(id) || [];
+    const traces = Object.entries(result.timeline_colors).map(([name, color]) => {
+      const selected = spans.filter(row => row.activity === name);
       return {
         type: "bar", orientation: "h", name,
-        base: selected.map(row => row[startKey]),
-        x: selected.map(row => (row[endKey] === null ? result.end_time : row[endKey]) - row[startKey]),
+        base: selected.map(row => row.start),
+        x: selected.map(row => row.end - row.start),
         y: selected.map(row => escapeText(row.station)),
         marker: {color, line: {color: "black", width: 1}},
         hovertemplate: "%{y}<br>Duration: %{x:.2f}<extra>%{fullData.name}</extra>"

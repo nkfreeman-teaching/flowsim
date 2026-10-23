@@ -14,7 +14,7 @@ import pytest
 from polars.testing import assert_frame_equal
 
 import flowsim
-from flowsim import Model, results, validation
+from flowsim import Model, plots, results, validation
 from tests.models import (
     branching_service,
     deterministic_queue,
@@ -598,6 +598,62 @@ def test_viewer_escapes_model_text_and_plots_are_not_notebook_objects():
     assert len(result.customer_plot(1).data) == 5
     with pytest.raises(ValueError, match="does not exist"):
         result.customer_plot(99)
+
+
+def test_customer_timeline_spans_feed_the_plot_and_the_viewer():
+    # Customers arrive at 0, 1, ..., 6. Desk serves for 3 minutes with no
+    # waiting room, so later arrivals wait outside until Desk frees at 3 and 6.
+    # Quick takes no time, which writes no activity row and draws no bar.
+    model = Model()
+    source = model.source(
+        name="Customers",
+        interarrival=1,
+        first_arrival=0,
+    )
+    desk = model.station(
+        name="Desk",
+        capacity=1,
+        service_time=3,
+        buffer=0,
+        external_overflow="wait",
+    )
+    quick = model.station(
+        name="Quick",
+        capacity=1,
+        service_time=0,
+    )
+    model.route([source, desk, quick, model.exit])
+    result = model.run(duration=7)
+    spans = plots.timeline_spans(result)
+    # Customer 3 is in service from 6 until the end at 7, and customer 4 is
+    # still outside from 3 until 7.
+    assert spans.filter(pl.col("customer_id").is_in([1, 3, 4])).rows() == [
+        (1, "Waiting", "Desk", 0, 0),
+        (1, "Waiting", "Quick", 3, 3),
+        (3, "Waiting", "Desk", 6, 6),
+        (1, "In service", "Desk", 0, 3),
+        (3, "In service", "Desk", 6, 7),
+        (3, "Outside", "Outside", 2, 6),
+        (4, "Outside", "Outside", 3, 7),
+    ]
+    figure = result.customer_plot(2)
+    assert [
+        (trace.name, list(trace.y), list(trace.base), list(trace.x))
+        for trace in figure.data
+    ] == [
+        ("Waiting", ["Desk", "Quick"], [3, 6], [0, 0]),
+        ("In service", ["Desk"], [3], [3]),
+        ("Paused", [], [], []),
+        ("Blocked", [], [], []),
+        ("Outside", ["Outside"], [1], [2]),
+    ]
+    viewer = result.viewer()
+    start = viewer.index('<script id="result-data" type="application/json">')
+    payload = json.loads(
+        viewer[viewer.index(">", start) + 1 : viewer.index("</script>", start)]
+    )
+    assert payload["timeline"] == spans.to_dicts()
+    assert list(payload["timeline_colors"]) == [trace.name for trace in figure.data]
 
 
 def test_station_menus_select_traces_by_station_meta():

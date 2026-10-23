@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import polars as pl
 from plotly.offline import get_plotlyjs
 
-from flowsim.results import METRICS
+from flowsim.results import METRICS, Phase, Status
 from flowsim.validation import integer
 
 if TYPE_CHECKING:
@@ -23,6 +23,16 @@ BLUE = "#0072B2"
 ORANGE = "#D55E00"
 GREEN = "#009E73"
 PURPLE = "#CC79A7"
+GRAY = "#667085"
+
+# Customer timeline activities in legend order, with their bar colors.
+TIMELINE_COLORS = {
+    "Waiting": BLUE,
+    "In service": ORANGE,
+    "Paused": PURPLE,
+    "Blocked": GREEN,
+    "Outside": GRAY,
+}
 
 
 def label(text: str) -> str:
@@ -88,7 +98,7 @@ def network_diagram(model: Model) -> go.Figure:
             showarrow=True,
             arrowhead=2,
             arrowwidth=2,
-            arrowcolor="#667085",
+            arrowcolor=GRAY,
             text="",
         )
         if data["probability"] != 1:
@@ -178,7 +188,7 @@ def queue_plot(result: Results) -> go.Figure:
     if result.drain:
         figure.add_vline(
             x=result.duration,
-            line_color="#667085",
+            line_color=GRAY,
             line_dash="dash",
         )
     return figure
@@ -248,7 +258,7 @@ def resource_plot(result: Results) -> go.Figure:
         ("blocked", GREEN, "Blocked"),
         ("paused", PURPLE, "Paused"),
         ("down", "#222222", "Down"),
-        ("available", "#667085", "Available"),
+        ("available", GRAY, "Available"),
         ("scheduled", BLUE, "Scheduled"),
     ]
     for index, station in enumerate(result.capacities):
@@ -288,67 +298,73 @@ def resource_plot(result: Results) -> go.Figure:
     if result.drain:
         figure.add_vline(
             x=result.duration,
-            line_color="#667085",
+            line_color=GRAY,
             line_dash="dash",
         )
     return figure
 
 
+def timeline_spans(result: Results) -> pl.DataFrame:
+    """Return every customer's timeline bars, grouped in TIMELINE_COLORS order.
+
+    Waiting runs from station arrival to service start, and the server activity
+    rows give service, paused, and blocked time. A customer who waited outside a
+    full buffer gets an "Outside" bar until admission. An open end runs to the
+    end time. Zero-length service writes no activity row, so it draws no bar.
+    """
+    waiting = result.visits.select(
+        "customer_id",
+        pl.lit("Waiting").alias("activity"),
+        "station",
+        pl.col("arrival_time").alias("start"),
+        pl.col("service_start").alias("end"),
+    )
+    activities = [
+        result.activities.filter(pl.col("state") == state).select(
+            "customer_id",
+            pl.lit(activity).alias("activity"),
+            "station",
+            "start",
+            "end",
+        )
+        for activity, state in [
+            ("In service", Phase.PROCESSING),
+            ("Paused", Phase.PAUSED),
+            ("Blocked", Phase.BLOCKED),
+        ]
+    ]
+    outside = result.customers.filter(
+        (pl.col("status") == Status.OUTSIDE)
+        | (pl.col("outside_wait").is_not_null() & (pl.col("outside_wait") != 0))
+    ).select(
+        "customer_id",
+        pl.lit("Outside").alias("activity"),
+        pl.lit("Outside").alias("station"),
+        pl.col("arrival_time").alias("start"),
+        pl.col("admission_time").alias("end"),
+    )
+    return pl.concat([waiting, *activities, outside]).with_columns(
+        pl.col("end").fill_null(result.end_time),
+    )
+
+
 def customer_plot(result: Results, customer_id: int) -> go.Figure:
     identifier = integer(customer_id, "Customer ID")
-    rows = result.customers.filter(pl.col("customer_id") == identifier).to_dicts()
-    if not rows:
+    if result.customers.filter(pl.col("customer_id") == identifier).is_empty():
         raise ValueError(f"Customer {identifier} does not exist in this run.")
-    customer = rows[0]
-    visits = result.visits.filter(pl.col("customer_id") == identifier).to_dicts()
-    records = result.activities.filter(pl.col("customer_id") == identifier).to_dicts()
-    # Each bar is (station, start, end), and an open end runs to the end time.
-    bars = {
-        "Waiting": [
-            (visit["station"], visit["arrival_time"], visit["service_start"])
-            for visit in visits
-        ],
-        **{
-            label: [
-                (row["station"], row["start"], row["end"])
-                for row in records
-                if row["state"] == state
-            ]
-            for label, state in [
-                ("In service", "processing"),
-                ("Paused", "paused"),
-                ("Blocked", "blocked"),
-            ]
-        },
-        "Outside": (
-            [("Outside", customer["arrival_time"], customer["admission_time"])]
-            if customer["status"] == "outside"
-            or customer["outside_wait"] not in {None, 0}
-            else []
-        ),
-    }
-    colors = {
-        "Waiting": BLUE,
-        "In service": ORANGE,
-        "Paused": PURPLE,
-        "Blocked": GREEN,
-        "Outside": "#667085",
-    }
+    spans = timeline_spans(result).filter(pl.col("customer_id") == identifier)
     figure = go.Figure()
-    for activity, spans in bars.items():
-        spans = [
-            (station, start, result.end_time if end is None else end)
-            for station, start, end in spans
-        ]
+    for activity, color in TIMELINE_COLORS.items():
+        bars = spans.filter(pl.col("activity") == activity)
         figure.add_trace(
             go.Bar(
-                base=[start for _, start, _ in spans],
-                x=[end - start for _, start, end in spans],
-                y=[label(station) for station, _, _ in spans],
+                base=bars.get_column("start").to_list(),
+                x=(bars.get_column("end") - bars.get_column("start")).to_list(),
+                y=[label(station) for station in bars.get_column("station")],
                 orientation="h",
                 name=activity,
                 marker={
-                    "color": colors[activity],
+                    "color": color,
                     "line": {"color": "black", "width": 1},
                 },
                 hovertemplate="%{y}<br>Duration: %{x:.2f}<extra>%{fullData.name}</extra>",
@@ -390,7 +406,9 @@ def viewer_html(result: Results) -> str:
             "customers": result.customers.columns,
             "visits": result.visits.columns,
         },
-        "activities": result.activities.to_dicts(),
+        # The viewer draws these bars as given, so it matches customer_plot.
+        "timeline": timeline_spans(result).to_dicts(),
+        "timeline_colors": TIMELINE_COLORS,
         "failures": result.failures.to_dicts(),
         "stations": result.stations.to_dicts(),
         "summary": result.summary.to_dicts()[0],
