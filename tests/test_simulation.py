@@ -5,6 +5,7 @@ import json
 import zlib
 from dataclasses import fields
 
+import networkx as nx
 import numpy as np
 import polars as pl
 import pytest
@@ -441,11 +442,11 @@ def test_graph_validation_and_route_edit_are_atomic():
         model.run(duration=5)
     with pytest.raises(ValueError, match="acyclic"):
         model.route([a, b, a])
-    assert model._graph.out_degree(a.name) == 0
-    assert model._graph.out_degree(b.name) == 0
+    assert model.graph.out_degree(a.name) == 0
+    assert model.graph.out_degree(b.name) == 0
     with pytest.raises(ValueError, match="sum to one"):
         model.branch(a, {b: 0.5, model.exit: 0.4})
-    assert model._graph.out_degree(a.name) == 0
+    assert model.graph.out_degree(a.name) == 0
     model.route([a, b, model.exit])
     other = Model()
     with pytest.raises(ValueError, match="created by this model"):
@@ -825,3 +826,77 @@ def test_sources_and_stations_keep_their_own_durations():
     assert visits.get_column("arrival_time").to_list() == [0, 2, 4]
     assert visits.get_column("service_start").to_list() == [0, 3, 6]
     assert visits.get_column("service_end").to_list() == [3, 6, 9]
+
+
+def test_model_accessors_are_read_only():
+    model = Model()
+    arrivals = model.source(
+        name="Customers",
+        interarrival=1,
+    )
+    station = model.station(
+        name="Service",
+        capacity=1,
+        service_time=1,
+    )
+    model.route([arrivals, station, model.exit])
+    assert list(model.nodes) == ["Exit", "Customers", "Service"]
+    assert model.nodes["Service"] is station
+    with pytest.raises(TypeError):
+        model.nodes["Other"] = station
+    graph = model.graph
+    assert list(graph.edges(data="probability")) == [
+        ("Customers", "Service", 1.0),
+        ("Service", "Exit", 1.0),
+    ]
+    with pytest.raises(nx.NetworkXError, match="Frozen"):
+        graph.add_edge("Service", "Customers")
+    graph["Service"]["Exit"]["probability"] = 0.5
+    assert model.graph["Service"]["Exit"]["probability"] == 1.0
+
+
+def test_branch_draws_one_routing_choice_per_customer():
+    # By hand: Triage's routing stream is seeded by SeedSequence(entropy=3,
+    # spawn_key=(crc32("Triage"), 1)), and each customer leaving Triage takes
+    # one choice over (A, B) with probabilities 0.25 and 0.75. The source has
+    # one destination and draws nothing.
+    rng = np.random.default_rng(
+        np.random.SeedSequence(
+            entropy=3,
+            spawn_key=(zlib.crc32(b"Triage"), 1),
+        )
+    )
+    expected = [["A", "B"][rng.choice(2, p=[0.25, 0.75])] for _ in range(8)]
+    model = Model()
+    arrivals = model.source(
+        name="Customers",
+        interarrival=1,
+        first_arrival=0,
+        limit=8,
+    )
+    triage = model.station(
+        name="Triage",
+        capacity=1,
+        service_time=0,
+    )
+    a = model.station(
+        name="A",
+        capacity=8,
+        service_time=1,
+    )
+    b = model.station(
+        name="B",
+        capacity=8,
+        service_time=1,
+    )
+    model.route([arrivals, triage])
+    model.branch(triage, {a: 0.25, b: 0.75})
+    model.route([a, model.exit])
+    model.route([b, model.exit])
+    visits = model.run(
+        duration=10,
+        seed=3,
+    ).visits
+    routed = visits.filter(pl.col("station") != "Triage").sort("customer_id")
+    assert routed.get_column("station").to_list() == expected
+    assert "A" in expected and "B" in expected

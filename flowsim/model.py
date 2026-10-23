@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral, Real
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import networkx as nx
@@ -93,6 +94,16 @@ class Model:
                 kind="exit",
             )
         )
+
+    @property
+    def nodes(self) -> Mapping[str, Node]:
+        """Return a read-only view of the nodes by name, in definition order."""
+        return MappingProxyType(self._nodes)
+
+    @property
+    def graph(self) -> nx.DiGraph:
+        """Return a frozen copy of the routes, with each edge's probability."""
+        return nx.freeze(self._graph.copy())
 
     def _add(self, node: Node) -> Node:
         if not isinstance(node.name, str) or not node.name.strip():

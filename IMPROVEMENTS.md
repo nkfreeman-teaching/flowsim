@@ -208,8 +208,8 @@ tolerance of 1e-12.
 |---|---|---|---|---|
 | 4.1 | Replace dict records with slotted dataclasses, and test record fields against schemas | `engine.py`, `station.py`, `results.py` | Opus, Sonnet | done (3baa680) |
 | 4.2 | Replace status and phase strings with `StrEnum` | `engine.py`, `station.py`, `results.py` | Sonnet | done (83520a1) |
-| 4.3 | Split `Node.duration` into interarrival and service time, and name the stream pair | `model.py`, `engine.py`, `station.py` | Opus, Sonnet | done |
-| 4.4 | Add read-only `Model` accessors and precompute routing once per run | `model.py`, `engine.py`, `plots.py`, tests | Opus, Sonnet | open |
+| 4.3 | Split `Node.duration` into interarrival and service time, and name the stream pair | `model.py`, `engine.py`, `station.py` | Opus, Sonnet | done (0cadea6) |
+| 4.4 | Add read-only `Model` accessors and precompute routing once per run | `model.py`, `engine.py`, `plots.py`, tests | Opus, Sonnet | done |
 | 4.5 | Move `number`, `integer`, `sample` to a leaf module and hoist local imports | new `flowsim/validation.py`, all modules | Sonnet | open |
 | 4.6 | Document `_Station` and `_Server`, and share one future-staffing helper | `station.py:154-348` | Sonnet, suite | open |
 | 4.7 | Remove the unreachable "arriving" status | `engine.py:155` | Opus, Sonnet | open |

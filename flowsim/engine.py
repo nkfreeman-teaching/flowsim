@@ -55,6 +55,17 @@ class _Streams:
     routing: np.random.Generator
 
 
+@dataclass(
+    frozen=True,
+    slots=True,
+)
+class _Route:
+    """A node's destinations and, when it branches, their probabilities."""
+
+    destinations: tuple[Node, ...]
+    probabilities: np.ndarray | None
+
+
 class _Same:
     """Compare a sampling function by identity inside a definition key."""
 
@@ -91,7 +102,9 @@ class _Run:
         self.active_customers = 0
         self.finished = self.scheduler.event()
         self.streams: dict[str, _Streams] = {}
-        names = list(model._nodes)
+        nodes = model.nodes
+        graph = model.graph
+        names = list(nodes)
         keys: dict[str, int] = {}
         owners: dict[int, str] = {}
         for name in names:
@@ -117,9 +130,30 @@ class _Run:
                 durations=np.random.default_rng(node_seed(name, DURATION_STREAM)),
                 routing=np.random.default_rng(node_seed(name, ROUTING_STREAM)),
             )
+        # Routes are fixed for the run, so each node's choices are built once.
+        self.routes: dict[str, _Route] = {}
+        for name in names:
+            destinations = list(graph.successors(name))
+            if not destinations:
+                continue
+            probabilities = None
+            if len(destinations) > 1:
+                probabilities = np.asarray(
+                    [
+                        graph[name][destination]["probability"]
+                        for destination in destinations
+                    ],
+                    dtype=float,
+                )
+                # Normalize floating-point roundoff after the model's sum-to-one check.
+                probabilities /= probabilities.sum()
+            self.routes[name] = _Route(
+                destinations=tuple(nodes[destination] for destination in destinations),
+                probabilities=probabilities,
+            )
         self.stations: dict[str, _Station] = {}
         for name in names:
-            node = model._nodes[name]
+            node = nodes[name]
             if node.kind == "station":
                 self.histories[name] = []
                 self.stations[name] = _Station(
@@ -157,27 +191,23 @@ class _Run:
                 _Same(value) if callable(value) else value
                 for value in (getattr(node, field.name) for field in fields(node))
             )
-            for node in self.model._nodes.values()
+            for node in self.model.nodes.values()
         )
         routes = tuple(
             (origin, target, data["probability"])
-            for origin, target, data in self.model._graph.edges(data=True)
+            for origin, target, data in self.model.graph.edges(data=True)
         )
         return (self.model.time_unit, nodes, routes)
 
     def next_node(self, name: str) -> Node:
-        destinations = list(self.model._graph.successors(name))
-        if len(destinations) == 1:
-            return self.model._nodes[destinations[0]]
-        probabilities = [
-            self.model._graph[name][destination]["probability"]
-            for destination in destinations
-        ]
-        # Normalize floating-point roundoff after the model's sum-to-one check.
-        probabilities = np.asarray(probabilities, dtype=float)
-        probabilities /= probabilities.sum()
-        index = self.streams[name].routing.choice(len(destinations), p=probabilities)
-        return self.model._nodes[destinations[index]]
+        route = self.routes[name]
+        if route.probabilities is None:
+            return route.destinations[0]
+        index = self.streams[name].routing.choice(
+            len(route.destinations),
+            p=route.probabilities,
+        )
+        return route.destinations[index]
 
     def next_arrival_time(self, node: Node, rng: np.random.Generator) -> float | None:
         now = float(self.scheduler.now)
@@ -274,7 +304,7 @@ class _Run:
     def execute(self) -> Results:
         from flowsim.results import Results
 
-        for node in self.model._nodes.values():
+        for node in self.model.nodes.values():
             if node.kind == "source":
                 self.scheduler.process(self.source(node))
         self.scheduler.run(until=self.duration)
@@ -314,7 +344,7 @@ class _Run:
                     "failure_clock": node.failure_clock,
                     "failures_enabled": node.time_to_failure is not None,
                 }
-                for name, node in self.model._nodes.items()
+                for name, node in self.model.nodes.items()
             },
             capacities={
                 name: station.node.capacity for name, station in self.stations.items()
@@ -326,7 +356,7 @@ class _Run:
             warmup=self.warmup,
             time_unit=self.model.time_unit,
             seed=self.seed,
-            graph=self.model._graph,
+            graph=self.model.graph,
             definition=self.definition(),
         )
 

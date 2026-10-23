@@ -145,6 +145,10 @@ argument, since the package does not choose a default for how a shift ends,
 where overflow goes, or when a failure clock runs. Runnable versions of these
 models are in `examples/models.py` and `examples/extensions.py`.
 
+To inspect a model, `model.nodes` maps each name to its node in definition
+order, and `model.graph` returns a frozen NetworkX copy of the routes with each
+edge's `probability`. Neither can change the model.
+
 ### Branches and shared stations
 
 A branch sends each customer to exactly one destination, chosen with fixed

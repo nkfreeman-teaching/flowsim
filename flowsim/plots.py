@@ -45,7 +45,7 @@ def style(figure: go.Figure, x_label: str, y_label: str) -> go.Figure:
 
 
 def network_diagram(model: Model) -> go.Figure:
-    graph = model._graph
+    graph = model.graph
     positions = {}
     layers = list(nx.topological_generations(graph))
     for layer, names in enumerate(layers):
@@ -79,7 +79,7 @@ def network_diagram(model: Model) -> go.Figure:
                 bgcolor="white",
             )
     for kind, color in [("source", GREEN), ("station", BLUE), ("exit", ORANGE)]:
-        nodes = [node for node in model._nodes.values() if node.kind == kind]
+        nodes = [node for node in model.nodes.values() if node.kind == kind]
         labels = []
         for node in nodes:
             text = label(node.name)

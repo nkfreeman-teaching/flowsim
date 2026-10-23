@@ -783,7 +783,7 @@ def test_combined_model_conserves_work_customer_time_and_capacity(policy, clock)
             )
             assert state["busy"] <= station["capacity"]
             assert state["processing"] <= state["available"]
-            assert state["waiting"] <= model._nodes[name].buffer
+            assert state["waiting"] <= model.nodes[name].buffer
         records = result.activities.filter(pl.col("station") == name).to_dicts()
         processing_area = sum(
             max(0, min(row["end"], 180) - max(row["start"], 15))
