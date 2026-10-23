@@ -19,8 +19,9 @@ notebook-export = "marimo export html examples/lesson.py -o output/lesson.html"
 lesson-check = { cmd = "python -c \"import pathlib, sys; html = pathlib.Path('output/lesson.html').read_text(encoding='utf-8'); sys.exit('output/lesson.html has a Marimo size warning.' if 'too large for marimo' in html else 0)\"", depends-on = ["notebook-export"] }
 exercise = "python -m examples.service_day"
 extensions = "python -m examples.extensions"
+operations = "python -m examples.operations"
 # Run every example end to end, including the notebook, after behavioral changes.
-examples = { depends-on = ["demo", "exercise", "extensions", "lesson-check"] }
+examples = { depends-on = ["demo", "exercise", "extensions", "operations", "lesson-check"] }
 
 [dependencies]
 python = ">=3.12,<3.14"

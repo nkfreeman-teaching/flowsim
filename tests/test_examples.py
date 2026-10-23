@@ -6,7 +6,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from examples import extensions, models
+from examples import extensions, models, operations
 from examples.service_day import (
     ON_TIME_SHARE,
     OVERTIME_LIMIT,
@@ -26,6 +26,8 @@ from examples.service_day import (
         extensions.buffered_line,
         extensions.repairing_machine,
         extensions.combined_line,
+        operations.machining_line,
+        operations.cross_dock,
     ],
 )
 def test_example_models_run(build):
@@ -61,3 +63,56 @@ def test_worked_exercise_preserves_customer_accounting_and_target_rule():
             runs.get_column("arrivals").to_numpy()
             == runs.get_column("completed").to_numpy()
         )
+
+
+def test_machining_line_keeps_its_buffers_and_failure_rules():
+    result = operations.machining_line(buffers=(1, 2, 3, 0)).run(
+        duration=operations.SHIFT,
+        seed=3,
+    )
+    most_waiting = dict(
+        result.states.group_by("station").agg(pl.col("waiting").max()).rows()
+    )
+    # The Saw has no waiting room, so unsawn blanks wait outside as raw stock.
+    assert most_waiting == {"Saw": 0, "CNC": 1, "Wash": 2, "Assembly": 3, "Pack": 0}
+    assert result.states.filter(pl.col("outside") > 0).get_column(
+        "station"
+    ).unique().to_list() == ["Saw"]
+    assert set(result.failures.get_column("station")) == {"CNC"}
+    steady = operations.machining_line(failures=False).run(
+        duration=operations.SHIFT,
+        seed=3,
+    )
+    assert steady.failures.height == 0
+    # Blanks arrive every 2 minutes from 0, so 240 arrive in 480 minutes.
+    assert steady.summary.get_column("arrivals").item() == 240
+
+
+def test_cross_dock_holds_trucks_at_the_gate_when_the_yard_is_full():
+    result = operations.cross_dock(
+        doors=2,
+        yard=1,
+    ).run(
+        duration=operations.DOCK_DAY,
+        seed=5,
+        drain=True,
+    )
+    most_waiting = dict(
+        result.states.group_by("station").agg(pl.col("waiting").max()).rows()
+    )
+    assert most_waiting["Gate"] == 0
+    assert most_waiting["Unload"] == 1
+    gate = result.stations.filter(pl.col("station") == "Gate").to_dicts()[0]
+    assert gate["blocking_fraction"] > 0
+    assert result.summary.get_column("mean_outside_wait").item() > 0
+    assert result.summary.get_column("remaining").item() == 0
+    # Every truck leaves through outbound loading or put-away.
+    finals = (
+        result.visits.group_by("customer_id")
+        .agg(pl.col("station").last())
+        .get_column("station")
+        .unique()
+        .sort()
+        .to_list()
+    )
+    assert finals == ["Outbound load", "Put-away"]

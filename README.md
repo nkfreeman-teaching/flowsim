@@ -27,9 +27,10 @@ The repository defines these tasks:
 | `pixi run demo` | Runs the hand-calculated queue, two-stage network, and triage network in `examples/models.py`, then compares one, two, and three servers across 12 replications. Writes viewers, flowcharts, and CSV files under `output/`. |
 | `pixi run exercise` | Runs the worked staffing exercise (see Classroom exercise) and writes reports under `output/service-day/`. |
 | `pixi run extensions` | Runs peak demand with a lunch break, a buffered production line, a machine with repairs, and a combined line from `examples/extensions.py`, writing them under `output/extensions/`. |
+| `pixi run operations` | Runs the saturated machining line and the truck cross-dock in `examples/operations.py`, comparing buffer plans and dock capacity across 20 replications, and writes them under `output/operations/` (see Operations examples). |
 | `pixi run notebook` | Opens the Marimo lesson, which adds controls for staffing, shift and failure-clock rules, and customer timelines. |
 | `pixi run notebook-export` | Executes the lesson and saves `output/lesson.html`. |
-| `pixi run examples` | Runs the four tasks above that execute examples, and fails if Marimo replaced a lesson output with a size warning. |
+| `pixi run examples` | Runs the five tasks above that execute examples, and fails if Marimo replaced a lesson output with a size warning. |
 | `pixi run check` | Runs the tests, lint, format check, and notebook check. |
 | `pixi run format` | Formats the code with ruff. |
 
@@ -540,6 +541,61 @@ within 30 minutes after closing on at least 90% of days (18 of 20). These are
 adjustable teaching targets, not empirical service standards. The script chooses
 the lowest staffing level meeting both observed targets, and the observed day
 count is not a confidence bound on a population probability.
+
+## Operations examples
+
+`examples/operations.py` holds two multi-stage models from manufacturing and
+logistics, each with a scenario study. `pixi run operations` writes their
+comparison reports, one viewer per study, and the network diagrams under
+`output/operations/`.
+
+### A saturated machining line
+
+The machining line runs blanks through a saw, two CNC machines, a washer, two
+assembly fitters, and a packer during a 480-minute shift. Blanks are released
+every 2 minutes, which is faster than the line can work, and the saw has
+`buffer=0` with `external_overflow="wait"`, so unsawn blanks wait outside the
+line as raw stock. This pattern keeps the line saturated (i.e., it never
+starves for blanks), so the parts completed by closing measure its capacity.
+Raw stock counts toward flow time and `remaining_at_close`, so the study reports
+`completed_at_close`, and work in process (`mean_wip`) begins only at admission
+to the saw. The CNC machines fail on a busy clock, and assembly drops to one
+fitter for a lunch hour.
+
+`BUFFER_PLANS` gives the waiting spaces in front of the CNC, washer, assembly,
+and packing stations, and `line_study` compares the plans with a fourth
+scenario that removes the CNC failures. In the saved study, two spaces in front
+of each station add more than ten parts per shift relative to no buffers,
+moving those spaces in front of assembly changes output by less than one part,
+and removing the CNC failures adds about as many parts again. The CNC machines
+are the bottleneck, so buffers help where they keep the CNC from blocking or
+starving, and failures at the bottleneck cost about as much as removing every
+buffer.
+
+### A truck cross-dock
+
+The cross-dock receives inbound trucks at time-varying rates for 960 minutes.
+Two gate lanes check trucks in, and the gate has `buffer=0` with
+`external_overflow="wait"`, so trucks that find both lanes busy queue on the
+access road. Checked-in trucks wait in a yard (the unload station's buffer) for
+one of six dock doors, whose crews follow a shift plan. A full yard holds trucks
+in the gate lanes (blocking after service), which lengthens the road queue. The
+sorter fails while running, three quarters of loads go to outbound trailers,
+and the rest go to storage.
+
+`dock_study` serves every truck (`drain=True`) and compares eight doors and a
+yard of 20 spaces with the base case. In the saved study, eight doors shorten
+the mean flow time by about 8 minutes, while the larger yard leaves it
+unchanged, i.e., trucks move off the road and into the yard, but the doors
+still unload them at the same times. Comparisons accept only the metrics in the
+table above, so `queue_locations` averages `mean_outside_wait` and
+`mean_total_blocked` from the run summaries to show where each scenario's
+queue sits.
+
+Both models simplify their settings. Each truckload remains one job from gate
+to exit, since FlowSim cannot split a load into pallets or combine pallets into
+an outbound trailer, and every blank follows the same routing, since customers
+carry no product type.
 
 ## For maintainers
 
