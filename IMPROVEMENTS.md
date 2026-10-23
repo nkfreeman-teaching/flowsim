@@ -227,7 +227,7 @@ per line with a trailing comma (e.g., `Metric("system", "Mean total waiting time
 | 5.4 | Fix README and message drift | README, `model.py:24`, `:259`, `:301` | Opus, Sonnet | open |
 | 5.5 | Derive example labels and constants from one place | `examples/`, `tests/test_examples.py:40` | Opus, Sonnet | open |
 | 5.6 | Round-trip every exported CSV in the export test | `tests/test_simulation.py:361-377` | Sonnet | open |
-| 5.7 | Reword the AGENTS.md test-model rule | `AGENTS.md` | Sonnet | owner decision |
+| 5.7 | Reword the AGENTS.md test-model rule | `AGENTS.md` | Sonnet | open (owner approved) |
 
 **5.1.** The viewer JS hard-codes `Math.floor(i / 2)` and `Math.floor(i / 6)` (`viewer.html:217`,
 `:220`), which repeat the trace counts in `plots.py`. Set `meta=station` on each trace and select by
@@ -258,9 +258,9 @@ Import `WAIT_TARGET` and `ON_TIME_SHARE` in `tests/test_examples.py` in place of
 **5.6.** Extend the export round trip to `failures.csv` (a run with an unfinished repair, so
 `repair_end` is null), `activities.csv`, and `states.csv`, using the schema constants.
 
-**5.7 (owner decision).** AGENTS.md says library tests build models from `tests/models.py`, but
+**5.7 (owner approved 2026-10-23).** AGENTS.md says library tests build models from `tests/models.py`, but
 about 20 tests build small one-off models inline, and that reads better for a hand calculation.
-Recommendation: reword to "Library tests never import from `examples/`. Shared models live in
+Reword to "Library tests never import from `examples/`. Shared models live in
 `tests/models.py`, and one-off hand-calculation models may be built inline."
 
 ## Deferred and rejected
