@@ -1,6 +1,8 @@
 """Hand-derived closing rules and independently calculated paired contrasts."""
 
 import json
+import tomllib
+from pathlib import Path
 
 import polars as pl
 import pytest
@@ -353,6 +355,38 @@ def test_comparison_exports_run_counts_and_replication_definitions(tmp_path):
     assert "Scenario comparison" in result.viewer()
 
 
+def test_comparison_page_fills_its_template_once():
+    # One server gives waits 0, 1, and 2 (mean 1), and two servers give 0, 0,
+    # and 0, so every replication has the same mean and a zero-width interval.
+    result = compare(
+        scenarios={
+            "One": deterministic_queue(),
+            "__UNITS__ & co": deterministic_queue(capacity=2),
+        },
+        duration=3,
+        replications=3,
+        drain=True,
+    )
+    page = result.viewer(confidence=0.9)
+    assert "Intervals show 90% Student t uncertainty" in page
+    assert "<th>Mean (minutes)</th>" in page
+    assert (
+        "<tbody><tr><td>One</td><td>1.000</td><td>1.000</td><td>1.000</td><td>3</td></tr>"
+        "<tr><td>__UNITS__ &amp; co</td><td>0.000</td><td>0.000</td><td>0.000</td>"
+        "<td>3</td></tr></tbody>"
+    ) in page
+    assert "<h2>Difference from One</h2>" in page
+    for placeholder in ["__TEXT__", "__TITLE__", "__MEANS__", "__CHANGES__"]:
+        assert placeholder not in page
+    # The page template ships with the package, as viewer.html does.
+    pyproject = tomllib.loads(
+        (Path(__file__).parents[1] / "pyproject.toml").read_text()
+    )
+    assert (
+        "comparison.html" in pyproject["tool"]["setuptools"]["package-data"]["flowsim"]
+    )
+
+
 def test_drain_continues_when_staffing_returns_exactly_at_closing():
     # Arrivals at 0 and 10 wait for the first server at 20, the closing time.
     model = Model()
@@ -370,7 +404,10 @@ def test_drain_continues_when_staffing_returns_exactly_at_closing():
         shift_end="finish",
     )
     model.route([arrivals, station, model.exit])
-    result = model.run(duration=20, drain=True)
+    result = model.run(
+        duration=20,
+        drain=True,
+    )
     assert result.customers.get_column("exit_time").to_list() == [25, 30]
 
 
@@ -391,27 +428,48 @@ def test_drain_accepts_work_that_finishes_as_the_last_shift_ends():
         shift_end="pause",
     )
     model.route([arrivals, station, model.exit])
-    result = model.run(duration=1, drain=True)
+    result = model.run(
+        duration=1,
+        drain=True,
+    )
     assert result.customers.get_column("exit_time").to_list() == [3]
 
 
 def test_experiments_reject_repeated_or_mismatched_runs():
-    run = service_network().run(duration=60, seed=1)
+    run = service_network().run(
+        duration=60,
+        seed=1,
+    )
     with pytest.raises(ValueError, match="distinct seeds"):
         Experiment([run, run, run])
-    longer = service_network().run(duration=90, seed=2)
+    longer = service_network().run(
+        duration=90,
+        seed=2,
+    )
     with pytest.raises(ValueError, match="same duration"):
         Experiment([run, longer])
     # Models that differ only in capacity are different models.
     with pytest.raises(ValueError, match="same model"):
         Experiment(
             [
-                deterministic_queue().run(duration=3, seed=1),
-                deterministic_queue(capacity=2).run(duration=3, seed=2),
+                deterministic_queue().run(
+                    duration=3,
+                    seed=1,
+                ),
+                deterministic_queue(capacity=2).run(
+                    duration=3,
+                    seed=2,
+                ),
             ]
         )
-    one = deterministic_queue().experiment(duration=3, replications=2)
-    other = deterministic_queue().experiment(duration=4, replications=2)
+    one = deterministic_queue().experiment(
+        duration=3,
+        replications=2,
+    )
+    other = deterministic_queue().experiment(
+        duration=4,
+        replications=2,
+    )
     with pytest.raises(ValueError, match="same duration"):
         Comparison({"One": one, "Other": other})
 
@@ -433,8 +491,16 @@ def test_experiments_reject_runs_of_different_models():
         model.route([arrivals, station, model.exit])
         return model
 
-    fast = queue(1).run(duration=3, seed=1, drain=True)
-    slow = queue(9).run(duration=3, seed=2, drain=True)
+    fast = queue(1).run(
+        duration=3,
+        seed=1,
+        drain=True,
+    )
+    slow = queue(9).run(
+        duration=3,
+        seed=2,
+        drain=True,
+    )
     # Arrivals at 0, 1, and 2 wait 0, 0, and 0 with one-minute service and 0, 8,
     # and 16 with nine-minute service. Pooling would report (0 + 8) / 2 = 4.
     assert fast.summary.get_column("mean_total_wait").to_list() == [0]
@@ -442,23 +508,47 @@ def test_experiments_reject_runs_of_different_models():
     with pytest.raises(ValueError, match="same model"):
         Experiment([fast, slow])
     # Separately built models with equal numeric settings still pool.
-    twin = queue(1).run(duration=3, seed=2, drain=True)
+    twin = queue(1).run(
+        duration=3,
+        seed=2,
+        drain=True,
+    )
     pooled = Experiment([fast, twin]).intervals("mean_total_wait")
     assert pooled.get_column("mean").to_list() == [0]
     # Equal-looking lambdas from separate builds are different objects.
     with pytest.raises(ValueError, match="same model"):
         Experiment(
             [
-                service_network().run(duration=60, seed=1),
-                service_network().run(duration=60, seed=2),
+                service_network().run(
+                    duration=60,
+                    seed=1,
+                ),
+                service_network().run(
+                    duration=60,
+                    seed=2,
+                ),
             ]
         )
     model = service_network()
-    Experiment([model.run(duration=60, seed=1), model.run(duration=60, seed=2)])
+    Experiment(
+        [
+            model.run(
+                duration=60,
+                seed=1,
+            ),
+            model.run(
+                duration=60,
+                seed=2,
+            ),
+        ]
+    )
 
 
 def test_experiment_intervals_cover_system_and_named_station_metrics():
-    trial = deterministic_queue().experiment(duration=7, replications=3)
+    trial = deterministic_queue().experiment(
+        duration=7,
+        replications=3,
+    )
     system = trial.intervals("mean_total_wait").to_dicts()
     # Waits are 0, 1, and 2 in every replication, so the mean is 1 exactly.
     assert system == [
@@ -473,7 +563,11 @@ def test_experiment_intervals_cover_system_and_named_station_metrics():
             "confidence": 0.95,
         }
     ]
-    station = trial.intervals("utilization", station="Service", confidence=0.9)
+    station = trial.intervals(
+        metric="utilization",
+        station="Service",
+        confidence=0.9,
+    )
     assert station.get_column("mean").to_list() == [pytest.approx(6 / 7)]
     with pytest.raises(ValueError, match="system metric"):
         trial.intervals("mean_total_wait", station="Service")

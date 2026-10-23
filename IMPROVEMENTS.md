@@ -247,8 +247,8 @@ have 24 calls outside the rule.
 | # | Change | Where | Found by | Status |
 |---|---|---|---|---|
 | 5.1 | Select viewer traces by station metadata instead of fixed counts | `plots.py:126-303`, `viewer.html:214-221` | All three | done (89491f4) |
-| 5.2 | Build each customer timeline once, in Python | `plots.py:306-375`, `viewer.html:223-275` | Opus, Sonnet | done |
-| 5.3 | Move the comparison page to a template file | `comparison.py:276-335` | Sonnet | open |
+| 5.2 | Build each customer timeline once, in Python | `plots.py:306-375`, `viewer.html:223-275` | Opus, Sonnet | done (491d6e8) |
+| 5.3 | Move the comparison page to a template file | `comparison.py:276-335` | Sonnet | done |
 | 5.4 | Fix README and message drift | README, `model.py:24`, `:259`, `:301` | Opus, Sonnet | open |
 | 5.5 | Derive example labels and constants from one place | `examples/`, `tests/test_examples.py:40` | Opus, Sonnet | open |
 | 5.6 | Round-trip every exported CSV in the export test | `tests/test_simulation.py:361-377` | Sonnet | open |
@@ -270,7 +270,11 @@ payload's activity rows, and the two-stage viewer grew from 5,094,735 to 5,129,7
 
 **5.3.** `Comparison.viewer` builds a 30-line f-string page with its own CSS, while `Results.viewer`
 uses `flowsim/viewer.html`. Move it to `flowsim/comparison.html` using the same placeholder scheme,
-and add it to package data.
+and add it to package data. Done with one `re.sub` pass over the template, so a scenario named like
+a placeholder stays literal. The three pages checked match the old output byte for byte, apart from
+the template's final newline. The 18 calls outside the keyword layout in `comparison.py` and
+`tests/test_service_day.py` are expanded, which leaves six in `scheduler.py` and
+`tests/test_scheduler.py`.
 
 **5.4.** Add `resource_plot()` to the README's figure list (as a note, since `test_readme` runs the
 first-model block). Change "The prototype supports acyclic routes only." to "FlowSim supports

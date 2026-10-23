@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -223,7 +224,10 @@ class Comparison:
             margin={"l": 155, "r": 35, "t": 35, "b": 80},
         )
         # List scenarios top to bottom in the order they were defined.
-        figure.update_yaxes(autorange="reversed", automargin=True)
+        figure.update_yaxes(
+            autorange="reversed",
+            automargin=True,
+        )
         if fraction:
             figure.update_xaxes(tickformat=".0%")
         if differences:
@@ -303,34 +307,26 @@ class Comparison:
                 else "Service stops at closing. Waiting and flow averages include observed outcomes."
             )
         )
-        document = f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FlowSim scenario comparison</title>
-<style>
-body {{font-family: system-ui, sans-serif; color: #172b3a; background: #f3f6f8; margin: 0;}}
-main {{max-width: 1000px; margin: auto; padding: 28px;}}
-section {{background: white; padding: 20px; margin: 18px 0; border: 1px solid #dce3e8; border-radius: 10px; overflow-x: auto;}}
-p {{line-height: 1.5;}} h1 {{font-size: 28px;}} h2 {{font-size: 20px;}}
-table {{border-collapse: collapse; width: 100%;}}
-td,th {{text-align: right; padding: 10px; border-bottom: 1px solid #e4eaef;}}
-td:first-child,th:first-child {{text-align: left;}}
-</style></head><body><main>
-<h1>Scenario comparison</h1><p>{html.escape(text)}</p>
-<section><h2>{html.escape(title)}</h2>
-<p>Points show means across independent replications.
-Intervals show {confidence:.0%} Student t uncertainty across run estimates.</p>
-{means_html}
-<table><thead><tr><th>Scenario</th><th>Mean ({units})</th><th>Lower limit ({units})</th><th>Upper limit ({units})</th><th>Observed runs</th></tr></thead>
-<tbody>{table_rows}</tbody></table></section>
-<section><h2>Difference from {html.escape(reference)}</h2>
-<p>Each difference is the scenario value minus its baseline value within the same
-replication. Negative values indicate a smaller metric. The dashed line marks zero.</p>
-{changes_html}</section>
-<p>The saved report works offline. Intervals describe the selected finite-day statistic.
-They do not establish steady-state performance. Wait and flow averages exclude rejected
-arrivals, which can be compared separately. Raw runs remain available in Python.</p>
-</main></body></html>"""
+        values = {
+            "TEXT": html.escape(text),
+            "TITLE": html.escape(title),
+            "CONFIDENCE": f"{confidence:.0%}",
+            "MEANS": means_html,
+            "UNITS": units,
+            "TABLE_ROWS": table_rows,
+            "REFERENCE": html.escape(reference),
+            "CHANGES": changes_html,
+        }
+        template = (
+            Path(__file__).with_name("comparison.html").read_text(encoding="utf-8")
+        )
+        # One pass over the template, so a placeholder-like scenario name or
+        # Plotly text inside a value is never replaced.
+        document = re.sub(
+            pattern=r"__([A-Z_]+)__",
+            repl=lambda match: values[match.group(1)],
+            string=template,
+        )
         if path is not None:
             write_text(path, document)
         return document
