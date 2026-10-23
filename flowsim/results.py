@@ -77,7 +77,6 @@ FAILURE_SCHEMA = {
 class Status(StrEnum):
     """A customer's status, as written to the customers table."""
 
-    ARRIVING = "arriving"
     OUTSIDE = "outside"
     WAITING = "waiting"
     IN_SERVICE = "in_service"
@@ -114,7 +113,8 @@ class _Customer:
     admitted: bool = False
     admission_time: float | None = None
     outside_wait: float | None = None
-    status: Status = Status.ARRIVING
+    # The customer's process sets a status when it starts, at the arrival time.
+    status: Status | None = None
     station: str | None = None
 
 

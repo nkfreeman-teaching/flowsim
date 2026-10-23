@@ -900,3 +900,24 @@ def test_branch_draws_one_routing_choice_per_customer():
     routed = visits.filter(pl.col("station") != "Triage").sort("customer_id")
     assert routed.get_column("station").to_list() == expected
     assert "A" in expected and "B" in expected
+
+
+def test_every_customer_has_a_status_from_the_arrival_instant():
+    # By hand: arrivals at 0, 1, and 2 need 2 units each. At closing time 2.5,
+    # customer 1 finished at 2, customer 2 has been in service since 2, and
+    # customer 3, who arrived at 2, is waiting.
+    result = deterministic_queue().run(duration=2.5)
+    assert result.customers.get_column("status").to_list() == [
+        results.Status.COMPLETED,
+        results.Status.IN_SERVICE,
+        results.Status.WAITING,
+    ]
+    assert [status.value for status in results.Status] == [
+        "outside",
+        "waiting",
+        "in_service",
+        "blocked",
+        "paused",
+        "rejected",
+        "completed",
+    ]
