@@ -251,8 +251,8 @@ have 24 calls outside the rule.
 | 5.3 | Move the comparison page to a template file | `comparison.py:276-335` | Sonnet | done (0c662d0) |
 | 5.4 | Fix README and message drift | README, `model.py:24`, `:259`, `:301` | Opus, Sonnet | done (9de0591) |
 | 5.5 | Derive example labels and constants from one place | `examples/`, `tests/test_examples.py:40` | Opus, Sonnet | done (4946b77) |
-| 5.6 | Round-trip every exported CSV in the export test | `tests/test_simulation.py:361-377` | Sonnet | done |
-| 5.7 | Reword the AGENTS.md test-model rule | `AGENTS.md` | Sonnet | open (owner approved) |
+| 5.6 | Round-trip every exported CSV in the export test | `tests/test_simulation.py:361-377` | Sonnet | done (a15623b) |
+| 5.7 | Reword the AGENTS.md test-model rule | `AGENTS.md` | Sonnet | done |
 
 **5.1.** The viewer JS hard-codes `Math.floor(i / 2)` and `Math.floor(i / 6)` (`viewer.html:217`,
 `:220`), which repeat the trace counts in `plots.py`. Set `meta=station` on each trace and select by

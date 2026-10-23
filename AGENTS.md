@@ -22,7 +22,8 @@ Keep the event scheduler in `flowsim/scheduler.py`, simulation processes in
   Schedules, finite buffers, and failures require explicit behavior arguments.
   Do not choose global defaults for shift ending, overflow, or failure clocks
   without an owner decision.
-- Library tests build models from `tests/models.py`, never from `examples/`.
+- Library tests never import from `examples/`. Shared models live in
+  `tests/models.py`, and one-off hand-calculation models may be built inline.
   Only `tests/test_examples.py` and `tests/test_readme.py` use `examples/`,
   to check that the examples and every README Python block still run.
 - Run `pixi run check` and `pixi run examples` after behavioral changes.

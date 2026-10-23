@@ -1212,6 +1212,24 @@ def test_validation_helpers_by_hand():
         validation.number(-1, "Time")
 
 
+def test_only_the_example_tests_import_examples():
+    # AGENTS.md keeps library tests independent of examples/. test_readme.py
+    # runs README blocks that import examples, but does not import it itself.
+    importers = set()
+    for path in sorted(Path(__file__).parent.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            else:
+                continue
+            if any(module.split(".")[0] == "examples" for module in modules):
+                importers.add(path.name)
+    assert importers == {"test_examples.py"}
+
+
 def test_imports_sit_at_module_level_except_the_plot_methods():
     # results.py and plots.py import each other, so Results imports its plot
     # functions when a plot method runs. No other function imports a module.
