@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import polars as pl
-
 from flowsim import Model, compare
 
 # Machining line buffer plans, as waiting spaces in front of CNC, Wash,
@@ -189,23 +187,6 @@ def dock_study(replications: int = REPLICATIONS, seed: int = 11):
     )
 
 
-def queue_locations(comparison) -> pl.DataFrame:
-    """Average road wait and blocked time per scenario.
-
-    Comparisons accept only METRICS, which omit these two summary columns.
-    """
-    return pl.concat(
-        [
-            pl.concat([run.summary for run in experiment.runs]).select(
-                pl.lit(name).alias("scenario"),
-                pl.col("mean_outside_wait").mean(),
-                pl.col("mean_total_blocked").mean(),
-            )
-            for name, experiment in comparison.experiments.items()
-        ]
-    )
-
-
 def main():
     output = Path("output/operations")
     studies = [
@@ -240,7 +221,18 @@ def main():
                 baseline=baseline,
             )
         )
-        print(queue_locations(comparison))
+        # Where each scenario's queue sits, i.e., outside the first station or
+        # in servers blocked by a full station downstream.
+        for location in ["mean_outside_wait", "mean_total_blocked"]:
+            print(
+                comparison.intervals(metric=location).select(
+                    "scenario",
+                    "metric",
+                    "mean",
+                    "lower",
+                    "upper",
+                )
+            )
     machining_line().diagram().write_html(
         file=output / "machining-line" / "network.html",
         include_plotlyjs=True,

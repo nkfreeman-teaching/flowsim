@@ -587,10 +587,9 @@ and the rest go to storage.
 yard of 20 spaces with the base case. In the saved study, eight doors shorten
 the mean flow time by about 8 minutes, while the larger yard leaves it
 unchanged, i.e., trucks move off the road and into the yard, but the doors
-still unload them at the same times. Comparisons accept only the metrics in the
-table above, so `queue_locations` averages `mean_outside_wait` and
-`mean_total_blocked` from the run summaries to show where each scenario's
-queue sits.
+still unload them at the same times. Each study also prints intervals for
+`mean_outside_wait` and `mean_total_blocked`, which show whether a scenario's
+queue sits on the access road or in gate lanes blocked by a full yard.
 
 Both models simplify their settings. Each truckload remains one job from gate
 to exit, since FlowSim cannot split a load into pallets or combine pallets into
