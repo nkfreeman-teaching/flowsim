@@ -4,8 +4,9 @@ The scheduler keeps a heap of (time, priority, sequence, event) entries and
 processes the smallest entry first. Events at equal times run in priority order,
 and events with equal priority run in the order they were queued (not the order
 they were created). A process is a generator that yields events and resumes
-when each event is processed. These rules reproduce the SimPy 4.1.2 scheduler
-that FlowSim used earlier, so a model and seed give the same records as before.
+when each event is processed. These rules follow the SimPy 4.1.2 scheduler that
+FlowSim used earlier, and the scheduler was checked against SimPy 4.1.2 at commit
+32e96d3.
 """
 
 from __future__ import annotations

@@ -43,7 +43,7 @@ outputs.
 | 1.3 | A non-advancing failure and repair cycle hangs the run | `flowsim/station.py:110-151`, `engine.py:105-124` | Codex | Error instead of hang | done (7366e30) |
 | 1.4 | Make "shift changes first" an explicit priority and fix the tie-order wording | `scheduler.py`, `engine.py:18-23`, `station.py:173-180`, README, AGENTS.md | Opus, Sonnet | None expected | done (de9689a) |
 | 1.5 | Add the missing tie-order and shared-admission tests | `tests/`, README | Sonnet, Opus | None | done (7569926) |
-| 1.6 | Give validation tests a `match` | `tests/test_extensions.py:483`, `:503` | Opus | None | done |
+| 1.6 | Give validation tests a `match` | `tests/test_extensions.py:483`, `:503` | Opus | None | done (5c6d810) |
 
 **1.1.** Both `mo.iframe(html=results.viewer())` cells (`examples/lesson.py:129-134`, `:348-353`)
 exceed Marimo's default output limit of 8,000,000 bytes, so students see a warning in place of
@@ -112,7 +112,7 @@ so 12 cases pass on the wrong error. Add the expected message fragment to each c
 
 | # | Change | Where | Found by | Outputs | Status |
 |---|---|---|---|---|---|
-| 2.1 | Key random streams by node name | `flowsim/engine.py:50-61`, README | Opus, Sonnet | Every seeded run, once | open |
+| 2.1 | Key random streams by node name | `flowsim/engine.py:50-61`, README | Opus, Sonnet | Every seeded run, once | done |
 | 2.2 | List stations in model definition order | `flowsim/engine.py:62-72` | Sonnet | Row order | open |
 | 2.3 | Rename `in_service_*` to `occupied_*` and relabel plots | `results.py:299-301`, `plots.py:132`, `viewer.html`, README | Opus, Sonnet | Column names | open |
 | 2.4 | Add `measurement_rejected` and `measurement_admitted` | `results.py:356-424`, `METRICS`, README | Opus | New columns | open |

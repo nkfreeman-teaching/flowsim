@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import zlib
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -22,6 +23,12 @@ if TYPE_CHECKING:
 # checks run last, after every other event at the same time.
 ARRIVAL_PRIORITY = 3
 SETTLED_PRIORITY = 4
+
+# Each node's seeds use its name's CRC-32 and one of these purposes as the spawn
+# key. Server failure and repair seeds are spawned from the SERVER_STREAMS seed.
+DURATION_STREAM = 0
+ROUTING_STREAM = 1
+SERVER_STREAMS = 2
 
 
 class _Run:
@@ -49,26 +56,40 @@ class _Run:
         self.finished = self.scheduler.event()
         self.streams: dict[str, tuple[np.random.Generator, np.random.Generator]] = {}
         names = sorted(model._nodes)
-        root = np.random.SeedSequence(seed)
-        # Each node has a duration stream and a routing stream. A third set of
-        # children seeds server failure and repair streams. The spawn order
-        # fixes every stream for a given seed and set of node names.
-        seeds = root.spawn(2 * len(names))
-        for index, name in enumerate(names):
-            self.streams[name] = (
-                np.random.default_rng(seeds[2 * index]),
-                np.random.default_rng(seeds[2 * index + 1]),
+        keys: dict[str, int] = {}
+        owners: dict[int, str] = {}
+        for name in names:
+            key = zlib.crc32(name.encode())
+            if key in owners:
+                raise ValueError(
+                    f"Node names {owners[key]!r} and {name!r} share a random-stream "
+                    "key. Rename one of them."
+                )
+            owners[key] = name
+            keys[name] = key
+
+        def node_seed(name: str, purpose: int) -> np.random.SeedSequence:
+            # A node's streams depend only on the seed and its own name, so
+            # adding or removing another node leaves its draws unchanged.
+            return np.random.SeedSequence(
+                entropy=seed,
+                spawn_key=(keys[name], purpose),
             )
-        server_seeds = root.spawn(len(names))
+
+        for name in names:
+            self.streams[name] = (
+                np.random.default_rng(node_seed(name, DURATION_STREAM)),
+                np.random.default_rng(node_seed(name, ROUTING_STREAM)),
+            )
         self.stations: dict[str, _Station] = {}
-        for index, name in enumerate(names):
+        for name in names:
             node = model._nodes[name]
             if node.kind == "station":
                 self.histories[name] = []
                 self.stations[name] = _Station(
                     run=self,
                     node=node,
-                    seed=server_seeds[index],
+                    seed=node_seed(name, SERVER_STREAMS),
                 )
                 self.observe(name)
 

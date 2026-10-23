@@ -409,8 +409,9 @@ system metric gives one row. Missing run values are excluded and counted in
 selected stopping rule, so they do not establish steady-state performance, and
 intervals from undrained runs do not correct the missing-outcome bias described
 above. Repeated runs with the same seed and model reproduce results in the
-locked environment. Changing only capacity preserves arrival streams, while
-adding or renaming nodes can change which stream each node receives. The
+locked environment. Each node's random streams depend only on the seed and
+the node's name, so adding, removing, or capacity-changing another node leaves
+a node's own draws unchanged, while renaming a node gives it new streams. The
 `examples` import in this section and the next works from the repository root.
 
 `compare` runs named models with the same replication seeds and pairs their
@@ -457,10 +458,11 @@ across those paired differences. A missing value excludes that pair and reduces
 `station`, `confidence`, and `baseline` arguments. Compared models must declare
 the same time unit, and a station metric requires that station in every
 scenario. Replication identity and seed matching are checked before paired
-differences are calculated. Matching seeds preserve the arrival stream when only
-capacity changes, but they do not guarantee that each customer receives the
-same draws when the network structure or the order of upstream completions
-changes.
+differences are calculated. Matching seeds give each node the same draws in
+every scenario that keeps its name, so a source's arrivals match across
+scenarios. They do not guarantee that each customer receives the same service
+draws when the network structure or the order of upstream completions changes,
+because a station draws in the order customers reach it.
 
 The table below lists the metrics that `intervals`, `differences`, and `plot`
 accept. System metrics come from `summary`, and station metrics come from
@@ -552,5 +554,5 @@ viewer embeds raw records, so it can become large for long runs (approximately
 5 MB for one 480-minute day of the first model). Numeric outputs target
 classroom tables and plots, and LaTeX numeric exports are not included. FlowSim
 schedules events with its own scheduler (`flowsim/scheduler.py`) rather than a
-simulation library, and that scheduler reproduces the event order of SimPy
-4.1.2. The package is released under the MIT license.
+simulation library, and that scheduler was checked against SimPy 4.1.2 at
+commit `32e96d3`. The package is released under the MIT license.

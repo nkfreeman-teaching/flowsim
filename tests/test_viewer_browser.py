@@ -41,10 +41,14 @@ def test_offline_viewer_controls_and_download(tmp_path, offline_page, drain):
     page.click("#show-customer")
     assert "Customer 2 arrived" in page.locator("#customer-details").inner_text()
     page.select_option("#status-choice", "in_service")
-    remaining = 0 if drain else 2
-    assert page.locator("#customers tbody tr").count() == remaining
+    # The expected counts come from the run, so this test checks the viewer's
+    # filter and download rather than a seeded count.
+    in_service = result.customers.filter(pl.col("status") == "in_service").height
+    remaining = result.customers.get_column("exit_time").null_count()
+    assert (in_service > 0) is not drain
+    assert page.locator("#customers tbody tr").count() == in_service
     assert (
-        f"{remaining} matching customers" in page.locator("#page-details").inner_text()
+        f"{in_service} matching customers" in page.locator("#page-details").inner_text()
     )
     with page.expect_download() as download_info:
         page.click("#download-customers")

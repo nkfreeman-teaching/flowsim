@@ -2,6 +2,7 @@
 
 import heapq
 import json
+import zlib
 
 import numpy as np
 import polars as pl
@@ -178,6 +179,79 @@ def test_capacity_changes_preserve_arrival_stream():
         first.customers.select("arrival_time"),
         second.customers.select("arrival_time"),
     )
+
+
+def test_node_streams_depend_only_on_the_seed_and_the_node_name():
+    # Each node's duration stream is seeded by SeedSequence(entropy=seed,
+    # spawn_key=(crc32(name), 0)), so NumPy alone gives the expected draws, and
+    # an unrelated source and station leave them unchanged.
+    def stream(name: str) -> np.random.Generator:
+        return np.random.default_rng(
+            np.random.SeedSequence(
+                entropy=7,
+                spawn_key=(zlib.crc32(name.encode()), 0),
+            )
+        )
+
+    arrivals = np.cumsum(stream("Customers").exponential(scale=5, size=40))
+    arrivals = arrivals[arrivals < 100]
+    services = stream("Service").exponential(scale=4, size=len(arrivals))
+
+    def build(unrelated: bool) -> Model:
+        model = Model()
+        if unrelated:
+            other = model.source(
+                name="Other",
+                interarrival=3,
+            )
+            aaa = model.station(
+                name="Aaa",
+                capacity=1,
+                service_time=1,
+            )
+            model.route([other, aaa, model.exit])
+        customers = model.source(
+            name="Customers",
+            interarrival=lambda rng: rng.exponential(scale=5),
+        )
+        service = model.station(
+            name="Service",
+            capacity=1,
+            service_time=lambda rng: rng.exponential(scale=4),
+        )
+        model.route([customers, service, model.exit])
+        return model
+
+    for unrelated in [False, True]:
+        result = build(unrelated).run(
+            duration=100,
+            seed=7,
+        )
+        customers = result.customers.filter(pl.col("source") == "Customers")
+        visits = result.visits.filter(pl.col("station") == "Service")
+        assert len(arrivals) > 10
+        assert customers.get_column("arrival_time").to_list() == pytest.approx(
+            arrivals.tolist(),
+            rel=1e-12,
+        )
+        assert visits.get_column("service_time").to_list() == services.tolist()
+
+
+def test_node_names_with_one_stream_key_raise():
+    # "buckeroo" and "plumless" have the same CRC-32, 1306201125.
+    model = Model()
+    arrivals = model.source(
+        name="plumless",
+        interarrival=1,
+    )
+    service = model.station(
+        name="buckeroo",
+        capacity=1,
+        service_time=1,
+    )
+    model.route([arrivals, service, model.exit])
+    with pytest.raises(ValueError, match="'buckeroo' and 'plumless' share"):
+        model.run(duration=5)
 
 
 def test_branch_routes_each_customer_to_one_service():
