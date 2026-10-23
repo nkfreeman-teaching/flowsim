@@ -3,11 +3,11 @@
 FlowSim is a Python package for classroom simulations of service networks, i.e.,
 systems in which customers or jobs arrive, wait for servers at one or more
 stations, and leave. A model is a set of arrival sources, stations with parallel
-servers, and routes between them. SimPy 4.1.2 schedules the events, and student
-code uses ordinary Python calls and NumPy duration samplers. Results are Polars
-tables, Plotly figures, CSV exports, and an offline HTML viewer. A Marimo lesson
-in `examples/lesson.py` is an optional classroom client, and the package itself
-has no Marimo dependency.
+servers, and routes between them. A small built-in scheduler orders the events,
+and student code uses ordinary Python calls and NumPy duration samplers. Results
+are Polars tables, Plotly figures, CSV exports, and an offline HTML viewer. A
+Marimo lesson in `examples/lesson.py` is an optional classroom client, and the
+package itself has no Marimo dependency.
 
 ## Getting started
 
@@ -38,7 +38,7 @@ library and data, so it opens directly in a browser without internet access.
 The lock file covers Linux, Windows, Intel Macs, and Apple Silicon Macs, and
 execution has been verified on Linux with Python 3.13. The package installs into
 other Python environments as the distribution `classroom-flowsim` (imported as
-`flowsim`), and it depends on SimPy, NumPy, Polars, NetworkX, Plotly, and SciPy.
+`flowsim`), and it depends on NumPy, Polars, NetworkX, Plotly, and SciPy.
 
 ## A first model
 
@@ -549,5 +549,6 @@ classroom-scale examples. There is no streaming or aggregate-only mode, and the
 viewer embeds raw records, so it can become large for long runs (approximately
 5 MB for one 480-minute day of the first model). Numeric outputs target
 classroom tables and plots, and LaTeX numeric exports are not included. FlowSim
-depends on SimPy 4.1.2 and does not modify its scheduler. The package is
-released under the MIT license.
+schedules events with its own scheduler (`flowsim/scheduler.py`), which
+reproduces the event order of SimPy 4.1.2, so FlowSim needs no simulation
+library. The package is released under the MIT license.

@@ -145,3 +145,31 @@ def combined_line(
     )
     model.route([arrivals, assembly, finishing, model.exit])
     return model
+
+
+def breaks_after_first_repair() -> Model:
+    """An idle machine fails at 1 and is repaired at 2. Its next lifetime raises."""
+    lifetimes = iter([1.0])
+
+    def lifetime(rng):
+        try:
+            return next(lifetimes)
+        except StopIteration:
+            raise ValueError("No second lifetime.") from None
+
+    model = Model()
+    arrivals = model.source(
+        name="Parts",
+        interarrival=1,
+        limit=0,
+    )
+    machine = model.station(
+        name="Machine",
+        capacity=1,
+        service_time=1,
+        time_to_failure=lifetime,
+        repair_time=1,
+        failure_clock="available",
+    )
+    model.route([arrivals, machine, model.exit])
+    return model

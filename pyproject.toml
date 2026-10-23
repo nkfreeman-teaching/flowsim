@@ -5,16 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "classroom-flowsim"
 dynamic = ["version"]
-description = "A small declarative service-network simulator built on SimPy."
+description = "A small declarative service-network simulator for the classroom."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Nickolas K Freeman", email = "nick.freeman524@gmail.com" }]
 requires-python = ">=3.12"
-# Floors are the versions the Pixi environment tests. The engine schedules
-# SimPy events with a custom priority, so SimPy is held to the 4.1 series.
+# Floors are the versions the Pixi environment tests.
 dependencies = [
-    "simpy>=4.1.2,<4.2",
     "numpy>=2.5.4,<3",
     "polars>=2,<3",
     "networkx>=3.7,<4",

@@ -1,8 +1,9 @@
 # FlowSim
 
 This is a general Python package for classroom service-network simulations.
-Keep SimPy in `flowsim/engine.py` and `flowsim/station.py`, and keep notebook
-interfaces in `examples/`.
+Keep the event scheduler in `flowsim/scheduler.py`, simulation processes in
+`flowsim/engine.py` and `flowsim/station.py`, and notebook interfaces in
+`examples/`. FlowSim has no SimPy dependency.
 
 - Use Pixi for Python commands and dependencies.
 - Numeric outputs are classroom tables, CSV files, and interactive plots.
@@ -13,8 +14,9 @@ interfaces in `examples/`.
   second customer path for plain stations.
 - At equal times, shift changes run first, then completions, transfers,
   failures, and repairs, then arrivals, then drain checks. `flowsim/engine.py`
-  sets this order with SimPy event priorities.
-- Verify timing and metrics with hand-calculated examples, not only SimPy output.
+  sets this order with scheduler event priorities.
+- Verify timing and metrics with hand-calculated examples, not only simulator
+  output.
 - Routes remain acyclic, and service remains first-come, first-served.
   Schedules, finite buffers, and failures require explicit behavior arguments.
   Do not choose global defaults for shift ending, overflow, or failure clocks

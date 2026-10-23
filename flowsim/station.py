@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-import simpy
 
 from flowsim.model import Node, sample
+from flowsim.scheduler import Event
 
 if TYPE_CHECKING:
     from flowsim.engine import _Run
@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 @dataclass
 class _Ticket:
     customer: dict
-    admitted: simpy.Event
-    finished: simpy.Event
+    admitted: Event
+    finished: Event
     external: bool
     visit: dict | None = None
     server: _Server | None = None
@@ -100,7 +100,7 @@ class _Server:
                 continue
             started = env.now
             timeout = env.timeout(remaining)
-            result = yield timeout | self.changed
+            result = yield env.any_of([timeout, self.changed])
             remaining = (
                 0.0 if timeout in result else max(0.0, remaining - (env.now - started))
             )

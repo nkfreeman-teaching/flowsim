@@ -1,13 +1,13 @@
-"""Translate network definitions into private SimPy processes."""
+"""Translate network definitions into private scheduler processes."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import numpy as np
-import simpy
 
 from flowsim.model import Node, sample
+from flowsim.scheduler import Event, Scheduler
 from flowsim.schedules import next_arrival
 from flowsim.station import _Station
 
@@ -15,22 +15,12 @@ if TYPE_CHECKING:
     from flowsim.model import Model
     from flowsim.results import Results
 
-# SimPy processes events at equal times by priority, then by creation order.
-# Shift changes, completions, transfers, failures, and repairs use SimPy's
-# NORMAL priority (1). Arrivals wait until those events settle, and drain
-# checks run last, after every other event at the same time.
+# The scheduler processes events at equal times by priority, then in the order
+# they were queued. Shift changes, completions, transfers, failures, and repairs
+# use the scheduler's NORMAL priority (1). Arrivals wait until those events
+# settle, and drain checks run last, after every other event at the same time.
 ARRIVAL_PRIORITY = 2
 SETTLED_PRIORITY = 3
-
-
-class _Wake(simpy.Event):
-    """A timeout with a chosen priority, initialized like simpy.Timeout."""
-
-    def __init__(self, env: simpy.Environment, delay: float, priority: int):
-        super().__init__(env)
-        self._ok = True
-        self._value = None
-        env.schedule(self, priority, delay)
 
 
 class _Run:
@@ -47,7 +37,7 @@ class _Run:
         self.warmup = warmup
         self.seed = seed
         self.drain = drain
-        self.env = simpy.Environment()
+        self.env = Scheduler()
         self.customers: list[dict] = []
         self.visits: list[dict] = []
         self.histories: dict[str, list[dict]] = {}
@@ -81,9 +71,9 @@ class _Run:
                 )
                 self.observe(name)
 
-    def settled(self) -> _Wake:
+    def settled(self) -> Event:
         """Wake after every other event at the current time."""
-        return _Wake(self.env, 0, SETTLED_PRIORITY)
+        return self.env.timeout(0, priority=SETTLED_PRIORITY)
 
     def observe(self, name: str) -> None:
         """Record the state after a change, retaining the last state at ties."""
@@ -147,7 +137,10 @@ class _Run:
             and arrival < self.duration
             and (node.limit is None or produced < node.limit)
         ):
-            yield _Wake(self.env, arrival - self.env.now, ARRIVAL_PRIORITY)
+            yield self.env.timeout(
+                arrival - self.env.now,
+                priority=ARRIVAL_PRIORITY,
+            )
             customer = {
                 "customer_id": len(self.customers) + 1,
                 "source": node.name,
