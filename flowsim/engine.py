@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import zlib
+from dataclasses import fields
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -29,6 +30,18 @@ SETTLED_PRIORITY = 4
 DURATION_STREAM = 0
 ROUTING_STREAM = 1
 SERVER_STREAMS = 2
+
+
+class _Same:
+    """Compare a sampling function by identity inside a definition key."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: object):
+        self.value = value
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Same) and other.value is self.value
 
 
 class _Run:
@@ -109,6 +122,25 @@ class _Run:
             history[-1] = row
         else:
             history.append(row)
+
+    def definition(self) -> tuple:
+        """Return a key that only runs of the same model definition share.
+
+        Sampling functions match only when they are the same object, so two
+        separately built models with their own lambdas never match.
+        """
+        nodes = tuple(
+            tuple(
+                _Same(value) if callable(value) else value
+                for value in (getattr(node, field.name) for field in fields(node))
+            )
+            for node in self.model._nodes.values()
+        )
+        routes = tuple(
+            (origin, target, data["probability"])
+            for origin, target, data in self.model._graph.edges(data=True)
+        )
+        return (self.model.time_unit, nodes, routes)
 
     def next_node(self, name: str) -> Node:
         destinations = list(self.model._graph.successors(name))
@@ -283,6 +315,7 @@ class _Run:
             time_unit=self.model.time_unit,
             seed=self.seed,
             graph=self.model._graph,
+            definition=self.definition(),
         )
 
 

@@ -234,6 +234,7 @@ class Results:
         time_unit: str,
         seed: int,
         graph: nx.DiGraph,
+        definition: tuple,
     ):
         self.customers = pl.DataFrame(
             data=customers,
@@ -265,6 +266,8 @@ class Results:
         self.time_unit = time_unit
         self.seed = seed
         self.graph = graph.copy()
+        # Experiment pools only runs whose model definitions match.
+        self._definition = definition
         self.stations = self._station_metrics()
         self.summary = self._system_metrics()
 
@@ -566,6 +569,12 @@ class Experiment:
             raise ValueError(
                 "Replications need the same duration, warm-up, drain rule, "
                 "time unit, and stations."
+            )
+        if any(run._definition != runs[0]._definition for run in runs):
+            raise ValueError(
+                "Replications need runs of the same model. Separately built "
+                "models count as different when their sampling functions are "
+                "different objects, so run every replication from one Model."
             )
         self.runs = runs
         self.stations = pl.concat(

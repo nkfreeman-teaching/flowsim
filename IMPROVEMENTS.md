@@ -120,7 +120,7 @@ so 12 cases pass on the wrong error. Add the expected message fragment to each c
 | 2.6 | Remove the unused paused-area accumulator | `results.py:253-276` | Codex | None | done (596d774) |
 | 2.7 | Give empty interval tables their columns | `results.py:149-158` | Sonnet | Empty frame gains columns | done (22ee111) |
 | 2.8 | Store staffing levels as integers | `schedules.py:45`, `station.py:159`, `:177` | Opus | `metadata.json` levels | done (d4a36de) |
-| 2.9 | Pin seeded outputs with a tripwire test | `tests/` | Opus, Sonnet | None | done |
+| 2.9 | Pin seeded outputs with a tripwire test | `tests/` | Opus, Sonnet | None | done (b8feca1) |
 
 **2.1 (owner approved).** Checked by both Claude reviewers: inserting a station named "Aaa" changes
 the first arrivals of an unrelated source (seed 7 gave `[3.59, 3.80, 10.27, 19.10]` before and
@@ -174,7 +174,7 @@ literals survive polars formatting changes.
 
 | # | Change | Where | Found by | Outputs | Status |
 |---|---|---|---|---|---|
-| 3.1 | `Experiment` accepts runs from different models | `results.py:505-531`, `engine.py` | Codex, Sonnet | Mixed runs now raise | open |
+| 3.1 | `Experiment` accepts runs from different models | `results.py:505-531`, `engine.py` | Codex, Sonnet | Mixed runs now raise | done |
 | 3.2 | Build `Experiment` tables from its runs on access | `results.py:532-564`, tests | Sonnet | None | open |
 | 3.3 | Share the settings check and metadata writer | `results.py`, `comparison.py` | Opus | Error text only | open |
 

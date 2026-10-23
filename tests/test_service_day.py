@@ -404,6 +404,47 @@ def test_experiments_reject_repeated_or_mismatched_runs():
         Comparison({"One": one, "Other": other})
 
 
+def test_experiments_reject_runs_of_different_models():
+    def queue(service_time: float) -> Model:
+        model = Model()
+        arrivals = model.source(
+            name="Customers",
+            interarrival=1,
+            first_arrival=0,
+            limit=3,
+        )
+        station = model.station(
+            name="Service",
+            capacity=1,
+            service_time=service_time,
+        )
+        model.route([arrivals, station, model.exit])
+        return model
+
+    fast = queue(1).run(duration=3, seed=1, drain=True)
+    slow = queue(9).run(duration=3, seed=2, drain=True)
+    # Arrivals at 0, 1, and 2 wait 0, 0, and 0 with one-minute service and 0, 8,
+    # and 16 with nine-minute service. Pooling would report (0 + 8) / 2 = 4.
+    assert fast.summary.get_column("mean_total_wait").to_list() == [0]
+    assert slow.summary.get_column("mean_total_wait").to_list() == [8]
+    with pytest.raises(ValueError, match="same model"):
+        Experiment([fast, slow])
+    # Separately built models with equal numeric settings still pool.
+    twin = queue(1).run(duration=3, seed=2, drain=True)
+    pooled = Experiment([fast, twin]).intervals("mean_total_wait")
+    assert pooled.get_column("mean").to_list() == [0]
+    # Equal-looking lambdas from separate builds are different objects.
+    with pytest.raises(ValueError, match="same model"):
+        Experiment(
+            [
+                service_network().run(duration=60, seed=1),
+                service_network().run(duration=60, seed=2),
+            ]
+        )
+    model = service_network()
+    Experiment([model.run(duration=60, seed=1), model.run(duration=60, seed=2)])
+
+
 def test_experiment_intervals_cover_system_and_named_station_metrics():
     trial = deterministic_queue().experiment(duration=7, replications=3)
     system = trial.intervals("mean_total_wait").to_dicts()
