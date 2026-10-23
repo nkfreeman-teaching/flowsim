@@ -175,8 +175,8 @@ literals survive polars formatting changes.
 | # | Change | Where | Found by | Outputs | Status |
 |---|---|---|---|---|---|
 | 3.1 | `Experiment` accepts runs from different models | `results.py:505-531`, `engine.py` | Codex, Sonnet | Mixed runs now raise | done (605bbc2) |
-| 3.2 | Build `Experiment` tables from its runs on access | `results.py:532-564`, tests | Sonnet | None | done |
-| 3.3 | Share the settings check and metadata writer | `results.py`, `comparison.py` | Opus | Error text only | open |
+| 3.2 | Build `Experiment` tables from its runs on access | `results.py:532-564`, tests | Sonnet | None | done (1365f34) |
+| 3.3 | Share the settings check and metadata writer | `results.py`, `comparison.py` | Opus | Error text only | done |
 
 **3.1.** Checked: `Experiment([...])` pooled a service-time-1 model and a service-time-9 model as
 two replications and reported a mean wait of 4.0. The settings tuple compares only duration,
@@ -195,7 +195,9 @@ zero rows would otherwise get a length-1 array that broadcasts silently in `diff
 **3.3.** `results.py:518-531` and `comparison.py:37-47` each define a `settings()` tuple, both
 check station existence, and both write `metadata.json` with their own version stamp. Add one
 `_run_settings(run)` and one `_write_metadata(path, data)` helper in `results.py`, and drop the
-duplicate station check from `Comparison._values`.
+duplicate station check from `Comparison._values`. Done with one addition: `Experiment` no
+longer compares capacities in its settings tuple, since the 3.1 model check already covers
+station names and capacities, so a capacity-only mismatch now reports "same model".
 
 ## Block 4: typed records and module structure
 

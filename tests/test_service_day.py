@@ -321,7 +321,9 @@ def test_comparison_rejects_incomparable_units_and_unknown_fields():
         result.differences(baseline="Missing")
     with pytest.raises(ValueError, match="system metric"):
         result.intervals(metric="bad")
-    with pytest.raises(ValueError, match="missing in scenario"):
+    with pytest.raises(
+        ValueError, match="Scenario 'One': Station 'Missing' is missing"
+    ):
         result.intervals(
             metric="mean_wait",
             station="Missing",
@@ -400,6 +402,14 @@ def test_experiments_reject_repeated_or_mismatched_runs():
     longer = service_network().run(duration=90, seed=2)
     with pytest.raises(ValueError, match="same duration"):
         Experiment([run, longer])
+    # Models that differ only in capacity are different models.
+    with pytest.raises(ValueError, match="same model"):
+        Experiment(
+            [
+                deterministic_queue().run(duration=3, seed=1),
+                deterministic_queue(capacity=2).run(duration=3, seed=2),
+            ]
+        )
     one = deterministic_queue().experiment(duration=3, replications=2)
     other = deterministic_queue().experiment(duration=4, replications=2)
     with pytest.raises(ValueError, match="same duration"):

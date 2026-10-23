@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import json
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -18,6 +17,8 @@ from flowsim.results import (
     STATION_METRICS,
     SYSTEM_METRICS,
     Experiment,
+    _run_settings,
+    _write_metadata,
     confidence_level,
     interval_estimate,
     interval_frame,
@@ -33,12 +34,8 @@ class Comparison:
         self.experiments = experiments
         self.baseline = next(iter(experiments))
         first = experiments[self.baseline].runs[0]
-
-        def settings(run) -> tuple:
-            return (run.duration, run.warmup, run.drain, run.time_unit)
-
         if any(
-            settings(experiment.runs[0]) != settings(first)
+            _run_settings(experiment.runs[0]) != _run_settings(first)
             for experiment in experiments.values()
         ):
             raise ValueError(
@@ -78,13 +75,8 @@ class Comparison:
             )
         if station is not None and metric not in STATION_METRICS:
             raise ValueError(f"Choose a station metric from {STATION_METRICS}.")
-        experiment = self.experiments[scenario]
-        if station is not None and station not in experiment.runs[0].capacities:
-            raise ValueError(
-                f"Station {station!r} is missing in scenario {scenario!r}."
-            )
         try:
-            return experiment._values(metric, station)
+            return self.experiments[scenario]._values(metric, station)
         except ValueError as error:
             raise ValueError(f"Scenario {scenario!r}: {error}") from None
 
@@ -373,10 +365,7 @@ arrivals, which can be compared separately. Raw runs remain available in Python.
         self.stations.write_csv(destination / "stations.csv")
         intervals.write_csv(destination / "intervals.csv")
         differences.write_csv(destination / "differences.csv")
-        from flowsim import __version__
-
         metadata = {
-            "flowsim_version": __version__,
             "baseline": reference,
             "metric": metric,
             "station": station,
@@ -388,7 +377,7 @@ arrivals, which can be compared separately. Raw runs remain available in Python.
             "replication_seeds": [run.seed for run in self.experiments[reference].runs],
             "difference": "Scenario minus baseline within matched replication",
         }
-        write_text(destination / "metadata.json", json.dumps(metadata, indent=2))
+        _write_metadata(destination / "metadata.json", metadata)
         return destination
 
 

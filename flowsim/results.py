@@ -195,6 +195,18 @@ def write_text(path: str | Path, text: str) -> None:
     )
 
 
+def _run_settings(run: Results) -> tuple:
+    """Return the settings that pooled or compared runs must share."""
+    return (run.duration, run.warmup, run.drain, run.time_unit)
+
+
+def _write_metadata(path: str | Path, data: dict) -> None:
+    """Write export metadata as JSON, stamped with the FlowSim version."""
+    from flowsim import __version__
+
+    write_text(path, json.dumps({"flowsim_version": __version__, **data}, indent=2))
+
+
 def interval_estimate(values: np.ndarray, confidence: float) -> dict:
     """Estimate uncertainty across independent finite replication values."""
     values = values[np.isfinite(values)]
@@ -515,10 +527,7 @@ class Results:
             "failures",
         ]:
             getattr(self, name).write_csv(destination / f"{name}.csv")
-        from flowsim import __version__
-
         metadata = {
-            "flowsim_version": __version__,
             "time_unit": self.time_unit,
             "duration": self.duration,
             "end_time": self.end_time,
@@ -539,7 +548,7 @@ class Results:
             "flow_cohort": "System arrivals at or after warmup with observed exits",
             "censoring": "Missing starts and exits remain null, never zero",
         }
-        write_text(destination / "metadata.json", json.dumps(metadata, indent=2))
+        _write_metadata(destination / "metadata.json", metadata)
         return destination
 
 
@@ -555,20 +564,11 @@ class Experiment:
                 "Replications need distinct seeds. A repeated run is not an "
                 "independent observation."
             )
-
-        def settings(run: Results) -> tuple:
-            return (
-                run.duration,
-                run.warmup,
-                run.drain,
-                run.time_unit,
-                tuple(run.capacities.items()),
-            )
-
-        if any(settings(run) != settings(runs[0]) for run in runs):
+        # The model check below also covers station names and capacities.
+        if any(_run_settings(run) != _run_settings(runs[0]) for run in runs):
             raise ValueError(
                 "Replications need the same duration, warm-up, drain rule, "
-                "time unit, and stations."
+                "and time unit."
             )
         if any(run._definition != runs[0]._definition for run in runs):
             raise ValueError(
