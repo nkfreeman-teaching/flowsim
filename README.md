@@ -498,7 +498,9 @@ accept. System metrics come from `summary`, and station metrics come from
 | `blocking_fraction` | Station | Blocked share of installed capacity |
 | `downtime_fraction` | Station | Down share of installed capacity |
 | `staffed_utilization` | Station | Processing share of available capacity |
+| `mean_scheduled_servers` | Station | Mean number of scheduled servers |
 | `mean_available_servers` | Station | Mean number of available servers |
+| `mean_outside_queue` | Station | Time-average customers waiting outside the station |
 
 The offline comparison viewer shows scenario means and paired differences for
 one metric (e.g., `viewer(metric="overtime")`). Comparison exports contain

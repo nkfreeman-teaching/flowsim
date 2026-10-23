@@ -121,7 +121,11 @@ METRICS = {
     "staffed_utilization": Metric(
         "station", "Processing / available capacity", "fraction"
     ),
+    "mean_scheduled_servers": Metric("station", "Mean scheduled servers", "servers"),
     "mean_available_servers": Metric("station", "Mean available servers", "servers"),
+    "mean_outside_queue": Metric(
+        "station", "Time-average customers waiting outside", "customers"
+    ),
 }
 SYSTEM_METRICS = [name for name, metric in METRICS.items() if metric.scope == "system"]
 STATION_METRICS = [

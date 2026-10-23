@@ -287,6 +287,33 @@ def test_measurement_rejections_and_admissions_use_the_window():
     assert (totals["measurement_admitted"], totals["measurement_rejected"]) == (1, 0)
 
 
+def test_intervals_accept_scheduled_servers_and_the_outside_queue():
+    # One server is scheduled over [0, 3) and none after, so the mean over
+    # [0, 4) is 3/4. Customer 1 is served over [0, 3). Customers 2 and 3 wait
+    # outside from 1 and 2, and nobody enters once the shift ends, so the
+    # outside area is 1 + 2 * 2 = 5 and its mean is 5/4.
+    model = single_station(
+        staffing=[(0, 1), (3, 0)],
+        shift_end="finish",
+        buffer=0,
+        external_overflow="wait",
+    )
+    experiment = model.experiment(
+        duration=4,
+        replications=2,
+    )
+    for metric, expected in [
+        ("mean_scheduled_servers", 0.75),
+        ("mean_outside_queue", 1.25),
+    ]:
+        interval = experiment.intervals(metric).to_dicts()[0]
+        assert (interval["mean"], interval["lower"], interval["upper"]) == (
+            expected,
+            expected,
+            expected,
+        )
+
+
 def test_shift_start_precedes_an_arrival_at_the_same_time():
     # The server starts at 5 and the only customer arrives at 5. With no
     # waiting room, the customer is served only if the shift change runs first.
