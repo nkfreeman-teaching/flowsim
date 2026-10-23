@@ -166,6 +166,37 @@ def test_fresh_runs_are_reproducible_and_do_not_change_old_results():
     assert not first.customers.equals(different.customers)
 
 
+def test_seeded_output_tripwire():
+    """Fail when a change moves the seeded output of a fixed model.
+
+    This is an intentional tripwire with hand-copied literals. A refactor that
+    should leave results alone must pass it unchanged. A change that is meant to
+    move seeded results updates these literals in the same commit and says so.
+    The relative tolerance allows only last-digit differences between platform
+    math libraries.
+    """
+    result = service_network().run(
+        duration=480,
+        seed=42,
+    )
+    summary = result.summary.to_dicts()[0]
+    assert result.customers.height == 167
+    assert result.customers.get_column("arrival_time").head(3).to_list() == (
+        pytest.approx(
+            [1.295810755926124, 2.73955226490688, 5.5055600126933],
+            rel=1e-12,
+        )
+    )
+    assert summary["mean_total_wait"] == pytest.approx(
+        6.9488085585975075,
+        rel=1e-12,
+    )
+    assert summary["mean_flow_time"] == pytest.approx(
+        13.12212491496525,
+        rel=1e-12,
+    )
+
+
 def test_capacity_changes_preserve_arrival_stream():
     first = service_network(service_capacity=1).run(
         duration=480,
