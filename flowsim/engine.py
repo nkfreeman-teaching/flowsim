@@ -37,7 +37,7 @@ class _Run:
         self.warmup = warmup
         self.seed = seed
         self.drain = drain
-        self.env = Scheduler()
+        self.scheduler = Scheduler()
         self.customers: list[dict] = []
         self.visits: list[dict] = []
         self.histories: dict[str, list[dict]] = {}
@@ -45,7 +45,7 @@ class _Run:
         self.failures: list[dict] = []
         self.closed = False
         self.active_customers = 0
-        self.finished = self.env.event()
+        self.finished = self.scheduler.event()
         self.streams: dict[str, tuple[np.random.Generator, np.random.Generator]] = {}
         names = sorted(model._nodes)
         root = np.random.SeedSequence(seed)
@@ -73,13 +73,13 @@ class _Run:
 
     def settled(self) -> Event:
         """Wake after every other event at the current time."""
-        return self.env.timeout(0, priority=SETTLED_PRIORITY)
+        return self.scheduler.timeout(0, priority=SETTLED_PRIORITY)
 
     def observe(self, name: str) -> None:
         """Record the state after a change, retaining the last state at ties."""
         row = {
             "station": name,
-            "time": float(self.env.now),
+            "time": float(self.scheduler.now),
             **self.stations[name].state(),
         }
         history = self.histories[name]
@@ -103,7 +103,7 @@ class _Run:
         return self.model._nodes[destinations[index]]
 
     def next_arrival_time(self, node: Node, rng: np.random.Generator) -> float | None:
-        now = float(self.env.now)
+        now = float(self.scheduler.now)
         if node.arrival_rates is not None:
             return next_arrival(
                 points=node.arrival_rates,
@@ -137,14 +137,14 @@ class _Run:
             and arrival < self.duration
             and (node.limit is None or produced < node.limit)
         ):
-            yield self.env.timeout(
-                arrival - self.env.now,
+            yield self.scheduler.timeout(
+                arrival - self.scheduler.now,
                 priority=ARRIVAL_PRIORITY,
             )
             customer = {
                 "customer_id": len(self.customers) + 1,
                 "source": node.name,
-                "arrival_time": float(self.env.now),
+                "arrival_time": float(self.scheduler.now),
                 "exit_time": None,
                 "flow_time": None,
                 "total_wait": 0.0,
@@ -157,7 +157,7 @@ class _Run:
             }
             self.customers.append(customer)
             self.active_customers += 1
-            self.env.process(self.customer(customer, node))
+            self.scheduler.process(self.customer(customer, node))
             produced += 1
             if node.limit is not None and produced >= node.limit:
                 return
@@ -167,7 +167,7 @@ class _Run:
         node = self.next_node(source.name)
         if node.kind == "exit":
             customer["admitted"] = True
-            customer["admission_time"] = float(self.env.now)
+            customer["admission_time"] = float(self.scheduler.now)
             customer["outside_wait"] = 0.0
         else:
             station = self.stations[node.name]
@@ -189,8 +189,8 @@ class _Run:
                 node = destination
                 station = downstream
                 ticket = next_ticket
-        customer["exit_time"] = float(self.env.now)
-        customer["flow_time"] = self.env.now - customer["arrival_time"]
+        customer["exit_time"] = float(self.scheduler.now)
+        customer["flow_time"] = self.scheduler.now - customer["arrival_time"]
         customer["status"] = "completed"
         customer["station"] = None
         self.complete_active()
@@ -205,8 +205,8 @@ class _Run:
 
         for node in self.model._nodes.values():
             if node.kind == "source":
-                self.env.process(self.source(node))
-        self.env.run(until=self.duration)
+                self.scheduler.process(self.source(node))
+        self.scheduler.run(until=self.duration)
         self.closed = True
         closing_states = {}
         for name in self.histories:
@@ -219,7 +219,7 @@ class _Run:
                 station.check_drain()
             # Stop at the final customer, excluding future shift changes,
             # recurring failures, and unused interrupted-service timeouts.
-            self.env.run(until=self.finished)
+            self.scheduler.run(until=self.finished)
             for name in self.histories:
                 self.observe(name)
         states = [row for history in self.histories.values() for row in history]
@@ -251,7 +251,7 @@ class _Run:
                 name: station.node.capacity for name, station in self.stations.items()
             },
             duration=self.duration,
-            end_time=float(self.env.now),
+            end_time=float(self.scheduler.now),
             drain=self.drain,
             closing_states=closing_states,
             warmup=self.warmup,

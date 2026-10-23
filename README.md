@@ -549,6 +549,6 @@ classroom-scale examples. There is no streaming or aggregate-only mode, and the
 viewer embeds raw records, so it can become large for long runs (approximately
 5 MB for one 480-minute day of the first model). Numeric outputs target
 classroom tables and plots, and LaTeX numeric exports are not included. FlowSim
-schedules events with its own scheduler (`flowsim/scheduler.py`), which
-reproduces the event order of SimPy 4.1.2, so FlowSim needs no simulation
-library. The package is released under the MIT license.
+schedules events with its own scheduler (`flowsim/scheduler.py`) rather than a
+simulation library, and that scheduler reproduces the event order of SimPy
+4.1.2. The package is released under the MIT license.

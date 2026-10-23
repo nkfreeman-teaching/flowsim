@@ -36,11 +36,11 @@ class _Server:
         self.ticket: _Ticket | None = None
         self.phase = "idle"
         self.activity: dict | None = None
-        self.changed = self.run.env.event()
+        self.changed = self.run.scheduler.event()
         self.failure_rng = np.random.default_rng(seeds[0])
         self.repair_rng = np.random.default_rng(seeds[1])
         if station.node.time_to_failure is not None:
-            self.run.env.process(self.failures())
+            self.run.scheduler.process(self.failures())
 
     @property
     def available(self) -> bool:
@@ -55,13 +55,13 @@ class _Server:
 
     def pulse(self) -> None:
         prior = self.changed
-        self.changed = self.run.env.event()
+        self.changed = self.run.scheduler.event()
         prior.succeed()
 
     def set_phase(self, phase: str) -> None:
         if self.phase == phase:
             return
-        now = float(self.run.env.now)
+        now = float(self.run.scheduler.now)
         if self.activity is not None:
             self.activity["end"] = now
         self.phase = phase
@@ -93,16 +93,18 @@ class _Server:
 
     def count_down(self, remaining: float, running: Callable[[], bool]):
         """Spend a duration only while a condition holds, waking on changes."""
-        env = self.run.env
+        scheduler = self.run.scheduler
         while remaining > 0:
             if not running():
                 yield self.changed
                 continue
-            started = env.now
-            timeout = env.timeout(remaining)
-            result = yield env.any_of([timeout, self.changed])
+            started = scheduler.now
+            timeout = scheduler.timeout(remaining)
+            result = yield scheduler.any_of([timeout, self.changed])
             remaining = (
-                0.0 if timeout in result else max(0.0, remaining - (env.now - started))
+                0.0
+                if timeout in result
+                else max(0.0, remaining - (scheduler.now - started))
             )
 
     def failures(self):
@@ -134,14 +136,14 @@ class _Server:
             row = {
                 "station": node.name,
                 "server_id": self.id,
-                "failure_time": float(self.run.env.now),
+                "failure_time": float(self.run.scheduler.now),
                 "time_to_failure": lifetime,
                 "repair_time": repair,
                 "repair_end": None,
             }
             self.run.failures.append(row)
-            yield self.run.env.timeout(repair)
-            row["repair_end"] = float(self.run.env.now)
+            yield self.run.scheduler.timeout(repair)
+            row["repair_end"] = float(self.run.scheduler.now)
             self.down = False
             self.sync_phase()
             self.pulse()
@@ -172,9 +174,10 @@ class _Station:
             # Queue every shift boundary before customer timeouts, giving shift
             # changes precedence over arrivals and completions at equal times.
             events = [
-                (run.env.timeout(time), int(level)) for time, level in node.staffing[1:]
+                (run.scheduler.timeout(time), int(level))
+                for time, level in node.staffing[1:]
             ]
-            run.env.process(self.shifts(events))
+            run.scheduler.process(self.shifts(events))
 
     def shifts(self, events):
         for event, level in events:
@@ -208,8 +211,8 @@ class _Station:
     def admit(self, customer: dict, *, external: bool) -> _Ticket | None:
         ticket = _Ticket(
             customer=customer,
-            admitted=self.run.env.event(),
-            finished=self.run.env.event(),
+            admitted=self.run.scheduler.event(),
+            finished=self.run.scheduler.event(),
             external=external,
         )
         if not self.pending and self.room():
@@ -229,7 +232,7 @@ class _Station:
         return ticket
 
     def place(self, ticket: _Ticket) -> None:
-        now = float(self.run.env.now)
+        now = float(self.run.scheduler.now)
         customer = ticket.customer
         if ticket.external:
             customer["admitted"] = True
@@ -268,11 +271,11 @@ class _Station:
                 idle.ticket = ticket
                 visit = ticket.visit
                 visit["server_id"] = idle.id
-                visit["service_start"] = float(self.run.env.now)
-                visit["wait_time"] = self.run.env.now - visit["arrival_time"]
+                visit["service_start"] = float(self.run.scheduler.now)
+                visit["wait_time"] = self.run.scheduler.now - visit["arrival_time"]
                 ticket.customer["total_wait"] += visit["wait_time"]
                 idle.sync_phase()
-                self.run.env.process(self.work(ticket))
+                self.run.scheduler.process(self.work(ticket))
                 continue
             if self.pending and self.room():
                 self.place(self.pending.popleft())
@@ -287,14 +290,16 @@ class _Station:
             remaining=ticket.visit["service_time"],
             running=lambda: server.phase == "processing",
         )
-        ticket.visit["service_end"] = float(self.run.env.now)
+        ticket.visit["service_end"] = float(self.run.scheduler.now)
         ticket.finished.succeed()
         server.sync_phase()
         self.run.observe(self.node.name)
 
     def release(self, ticket: _Ticket) -> None:
-        ticket.visit["departure_time"] = float(self.run.env.now)
-        ticket.visit["blocked_time"] = self.run.env.now - ticket.visit["service_end"]
+        ticket.visit["departure_time"] = float(self.run.scheduler.now)
+        ticket.visit["blocked_time"] = (
+            self.run.scheduler.now - ticket.visit["service_end"]
+        )
         ticket.customer["total_blocked"] += ticket.visit["blocked_time"]
         ticket.server.ticket = None
         ticket.server.sync_phase()
@@ -305,7 +310,7 @@ class _Station:
         """After closing, test whether a drained run can still finish."""
         if self.run.closed and self.run.drain and not self.drain_check_pending:
             self.drain_check_pending = True
-            self.run.env.process(self.settled_drain_check())
+            self.run.scheduler.process(self.settled_drain_check())
 
     def settled_drain_check(self):
         # Shift changes and completions at this instant can restore staffing
@@ -316,7 +321,7 @@ class _Station:
             self.node.staffing is None
             or self.scheduled_level > 0
             or any(
-                time > self.run.env.now and level > 0
+                time > self.run.scheduler.now and level > 0
                 for time, level in self.node.staffing
             )
         )
@@ -333,7 +338,7 @@ class _Station:
                 and not server.scheduled
                 and self.node.shift_end == "pause"
                 and not any(
-                    time > self.run.env.now and level >= server.id
+                    time > self.run.scheduler.now and level >= server.id
                     for time, level in self.node.staffing
                 )
             ):
