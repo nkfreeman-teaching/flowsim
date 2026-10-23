@@ -176,7 +176,7 @@ literals survive polars formatting changes.
 |---|---|---|---|---|---|
 | 3.1 | `Experiment` accepts runs from different models | `results.py:505-531`, `engine.py` | Codex, Sonnet | Mixed runs now raise | done (605bbc2) |
 | 3.2 | Build `Experiment` tables from its runs on access | `results.py:532-564`, tests | Sonnet | None | done (1365f34) |
-| 3.3 | Share the settings check and metadata writer | `results.py`, `comparison.py` | Opus | Error text only | done |
+| 3.3 | Share the settings check and metadata writer | `results.py`, `comparison.py` | Opus | Error text only | done (8e901f4) |
 
 **3.1.** Checked: `Experiment([...])` pooled a service-time-1 model and a service-time-9 model as
 two replications and reported a mean wait of 4.0. The settings tuple compares only duration,
@@ -206,7 +206,7 @@ tolerance of 1e-12.
 
 | # | Change | Where | Found by | Status |
 |---|---|---|---|---|
-| 4.1 | Replace dict records with slotted dataclasses, and test record fields against schemas | `engine.py`, `station.py`, `results.py` | Opus, Sonnet | open |
+| 4.1 | Replace dict records with slotted dataclasses, and test record fields against schemas | `engine.py`, `station.py`, `results.py` | Opus, Sonnet | done |
 | 4.2 | Replace status and phase strings with `StrEnum` | `engine.py`, `station.py`, `results.py` | Sonnet | open |
 | 4.3 | Split `Node.duration` into interarrival and service time, and name the stream pair | `model.py`, `engine.py`, `station.py` | Opus, Sonnet | open |
 | 4.4 | Add read-only `Model` accessors and precompute routing once per run | `model.py`, `engine.py`, `plots.py`, tests | Opus, Sonnet | open |
@@ -221,7 +221,9 @@ tolerance of 1e-12.
 Notes. For 4.1, a polars frame silently nulls a misspelled key (Opus checked: a row with `exit_tme`
 gave `exit_time == [None]` with no error), so the dataclasses and a field-equals-schema test close
 the gap. `Results.__init__` (16 parameters, suite CX1) may take one run-record object if that falls
-out naturally. For 4.4, normalize probabilities once so the same draws are consumed. For 4.5,
+out naturally. Done without that change. Polars also matches dataclass rows to a schema by position
+and casts mismatches silently (checked: a float field landed in an integer column), so `Results`
+gathers each column by field name. For 4.4, normalize probabilities once so the same draws are consumed. For 4.5,
 plotly is loaded on `import flowsim` already (checked: `comparison.py` imports `flowsim.plots` at
 the top), so the lazy plot imports save nothing. For 4.6, `settled_drain_check` has cyclomatic
 complexity 18, and its two searches for future staffing differ only in the level they need. For

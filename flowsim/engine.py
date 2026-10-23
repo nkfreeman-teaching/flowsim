@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import zlib
-from dataclasses import fields
+from dataclasses import fields, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from flowsim.model import Node, sample
+from flowsim.results import _Activity, _Customer, _Failure, _State, _Visit
 from flowsim.scheduler import Event, Scheduler
 from flowsim.schedules import next_arrival
 from flowsim.station import _Station
@@ -59,11 +60,11 @@ class _Run:
         self.seed = seed
         self.drain = drain
         self.scheduler = Scheduler()
-        self.customers: list[dict] = []
-        self.visits: list[dict] = []
-        self.histories: dict[str, list[dict]] = {}
-        self.activities: list[dict] = []
-        self.failures: list[dict] = []
+        self.customers: list[_Customer] = []
+        self.visits: list[_Visit] = []
+        self.histories: dict[str, list[_State]] = {}
+        self.activities: list[_Activity] = []
+        self.failures: list[_Failure] = []
         self.closed = False
         self.active_customers = 0
         self.finished = self.scheduler.event()
@@ -112,13 +113,13 @@ class _Run:
 
     def observe(self, name: str) -> None:
         """Record the state after a change, retaining the last state at ties."""
-        row = {
-            "station": name,
-            "time": float(self.scheduler.now),
+        row = _State(
+            station=name,
+            time=float(self.scheduler.now),
             **self.stations[name].state(),
-        }
+        )
         history = self.histories[name]
-        if history and history[-1]["time"] == row["time"]:
+        if history and history[-1].time == row.time:
             history[-1] = row
         else:
             history.append(row)
@@ -198,20 +199,11 @@ class _Run:
                 arrival - self.scheduler.now,
                 priority=ARRIVAL_PRIORITY,
             )
-            customer = {
-                "customer_id": len(self.customers) + 1,
-                "source": node.name,
-                "arrival_time": float(self.scheduler.now),
-                "exit_time": None,
-                "flow_time": None,
-                "total_wait": 0.0,
-                "total_blocked": 0.0,
-                "admitted": False,
-                "admission_time": None,
-                "outside_wait": None,
-                "status": "arriving",
-                "station": None,
-            }
+            customer = _Customer(
+                customer_id=len(self.customers) + 1,
+                source=node.name,
+                arrival_time=float(self.scheduler.now),
+            )
             self.customers.append(customer)
             self.active_customers += 1
             self.scheduler.process(self.customer(customer, node))
@@ -220,12 +212,12 @@ class _Run:
                 return
             arrival = self.next_arrival_time(node, rng)
 
-    def customer(self, customer: dict, source: Node):
+    def customer(self, customer: _Customer, source: Node):
         node = self.next_node(source.name)
         if node.kind == "exit":
-            customer["admitted"] = True
-            customer["admission_time"] = float(self.scheduler.now)
-            customer["outside_wait"] = 0.0
+            customer.admitted = True
+            customer.admission_time = float(self.scheduler.now)
+            customer.outside_wait = 0.0
         else:
             station = self.stations[node.name]
             ticket = station.admit(customer, external=True)
@@ -246,10 +238,10 @@ class _Run:
                 node = destination
                 station = downstream
                 ticket = next_ticket
-        customer["exit_time"] = float(self.scheduler.now)
-        customer["flow_time"] = self.scheduler.now - customer["arrival_time"]
-        customer["status"] = "completed"
-        customer["station"] = None
+        customer.exit_time = float(self.scheduler.now)
+        customer.flow_time = self.scheduler.now - customer.arrival_time
+        customer.status = "completed"
+        customer.station = None
         self.complete_active()
 
     def complete_active(self) -> None:
@@ -268,7 +260,7 @@ class _Run:
         closing_states = {}
         for name in self.histories:
             self.observe(name)
-            closing_states[name] = self.histories[name][-1].copy()
+            closing_states[name] = replace(self.histories[name][-1])
         if self.drain:
             if self.active_customers == 0:
                 self.finished.succeed()
@@ -282,9 +274,7 @@ class _Run:
         states = [row for history in self.histories.values() for row in history]
         # A phase that starts and ends at the same instant carries no time.
         activities = [
-            row
-            for row in self.activities
-            if row["end"] is None or row["end"] > row["start"]
+            row for row in self.activities if row.end is None or row.end > row.start
         ]
         return Results(
             customers=self.customers,

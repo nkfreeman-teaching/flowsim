@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from flowsim.model import Node, sample
+from flowsim.results import _Activity, _Customer, _Failure, _Visit
 from flowsim.scheduler import SHIFT_PRIORITY, Event
 
 if TYPE_CHECKING:
@@ -19,11 +20,11 @@ if TYPE_CHECKING:
 
 @dataclass
 class _Ticket:
-    customer: dict
+    customer: _Customer
     admitted: Event
     finished: Event
     external: bool
-    visit: dict | None = None
+    visit: _Visit | None = None
     server: _Server | None = None
 
 
@@ -36,7 +37,7 @@ class _Server:
         self.down = False
         self.ticket: _Ticket | None = None
         self.phase = "idle"
-        self.activity: dict | None = None
+        self.activity: _Activity | None = None
         self.changed = self.run.scheduler.event()
         self.failure_rng = np.random.default_rng(seeds[0])
         self.repair_rng = np.random.default_rng(seeds[1])
@@ -64,20 +65,19 @@ class _Server:
             return
         now = float(self.run.scheduler.now)
         if self.activity is not None:
-            self.activity["end"] = now
+            self.activity.end = now
         self.phase = phase
         self.activity = None
         if self.ticket is not None and phase != "idle":
-            self.activity = {
-                "customer_id": self.ticket.customer["customer_id"],
-                "station": self.station.node.name,
-                "server_id": self.id,
-                "state": phase,
-                "start": now,
-                "end": None,
-            }
+            self.activity = _Activity(
+                customer_id=self.ticket.customer.customer_id,
+                station=self.station.node.name,
+                server_id=self.id,
+                state=phase,
+                start=now,
+            )
             self.run.activities.append(self.activity)
-            self.ticket.customer["status"] = (
+            self.ticket.customer.status = (
                 "in_service" if phase == "processing" else phase
             )
         self.pulse()
@@ -138,17 +138,16 @@ class _Server:
                 rng=self.repair_rng,
                 label=f"Repair time at {node.name!r}, server {self.id}",
             )
-            row = {
-                "station": node.name,
-                "server_id": self.id,
-                "failure_time": float(self.run.scheduler.now),
-                "time_to_failure": lifetime,
-                "repair_time": repair,
-                "repair_end": None,
-            }
+            row = _Failure(
+                station=node.name,
+                server_id=self.id,
+                failure_time=float(self.run.scheduler.now),
+                time_to_failure=lifetime,
+                repair_time=repair,
+            )
             self.run.failures.append(row)
             yield self.run.scheduler.timeout(repair)
-            row["repair_end"] = float(self.run.scheduler.now)
+            row.repair_end = float(self.run.scheduler.now)
             self.down = False
             self.sync_phase()
             self.pulse()
@@ -225,7 +224,7 @@ class _Station:
             return True
         return self.node.buffer is None or len(self.waiting) < self.node.buffer
 
-    def admit(self, customer: dict, *, external: bool) -> _Ticket | None:
+    def admit(self, customer: _Customer, *, external: bool) -> _Ticket | None:
         ticket = _Ticket(
             customer=customer,
             admitted=self.run.scheduler.event(),
@@ -236,14 +235,14 @@ class _Station:
             self.place(ticket)
             self.dispatch()
         elif external and self.node.external_overflow == "reject":
-            customer["status"] = "rejected"
-            customer["station"] = self.node.name
+            customer.status = "rejected"
+            customer.station = self.node.name
             return None
         else:
             self.pending.append(ticket)
             if external:
-                customer["status"] = "outside"
-                customer["station"] = self.node.name
+                customer.status = "outside"
+                customer.station = self.node.name
             self.check_drain()
         self.run.observe(self.node.name)
         return ticket
@@ -252,30 +251,24 @@ class _Station:
         now = float(self.run.scheduler.now)
         customer = ticket.customer
         if ticket.external:
-            customer["admitted"] = True
-            customer["admission_time"] = now
-            customer["outside_wait"] = now - customer["arrival_time"]
-            customer["total_wait"] += customer["outside_wait"]
-        ticket.visit = {
-            "customer_id": customer["customer_id"],
-            "source": customer["source"],
-            "station": self.node.name,
-            "arrival_time": now,
-            "service_start": None,
-            "service_end": None,
-            "departure_time": None,
-            "wait_time": None,
-            "blocked_time": None,
-            "server_id": None,
-            "service_time": sample(
+            customer.admitted = True
+            customer.admission_time = now
+            customer.outside_wait = now - customer.arrival_time
+            customer.total_wait += customer.outside_wait
+        ticket.visit = _Visit(
+            customer_id=customer.customer_id,
+            source=customer.source,
+            station=self.node.name,
+            arrival_time=now,
+            service_time=sample(
                 distribution=self.node.duration,
                 rng=self.run.streams[self.node.name][0],
                 label=f"Service time at {self.node.name!r}",
             ),
-        }
+        )
         self.run.visits.append(ticket.visit)
-        customer["station"] = self.node.name
-        customer["status"] = "waiting"
+        customer.station = self.node.name
+        customer.status = "waiting"
         self.waiting.append(ticket)
         ticket.admitted.succeed()
 
@@ -287,10 +280,10 @@ class _Station:
                 ticket.server = idle
                 idle.ticket = ticket
                 visit = ticket.visit
-                visit["server_id"] = idle.id
-                visit["service_start"] = float(self.run.scheduler.now)
-                visit["wait_time"] = self.run.scheduler.now - visit["arrival_time"]
-                ticket.customer["total_wait"] += visit["wait_time"]
+                visit.server_id = idle.id
+                visit.service_start = float(self.run.scheduler.now)
+                visit.wait_time = self.run.scheduler.now - visit.arrival_time
+                ticket.customer.total_wait += visit.wait_time
                 idle.sync_phase()
                 self.run.scheduler.process(self.work(ticket))
                 continue
@@ -304,20 +297,18 @@ class _Station:
     def work(self, ticket: _Ticket):
         server = ticket.server
         yield from server.count_down(
-            remaining=ticket.visit["service_time"],
+            remaining=ticket.visit.service_time,
             running=lambda: server.phase == "processing",
         )
-        ticket.visit["service_end"] = float(self.run.scheduler.now)
+        ticket.visit.service_end = float(self.run.scheduler.now)
         ticket.finished.succeed()
         server.sync_phase()
         self.run.observe(self.node.name)
 
     def release(self, ticket: _Ticket) -> None:
-        ticket.visit["departure_time"] = float(self.run.scheduler.now)
-        ticket.visit["blocked_time"] = (
-            self.run.scheduler.now - ticket.visit["service_end"]
-        )
-        ticket.customer["total_blocked"] += ticket.visit["blocked_time"]
+        ticket.visit.departure_time = float(self.run.scheduler.now)
+        ticket.visit.blocked_time = self.run.scheduler.now - ticket.visit.service_end
+        ticket.customer.total_blocked += ticket.visit.blocked_time
         ticket.server.ticket = None
         ticket.server.sync_phase()
         ticket.server.pulse()

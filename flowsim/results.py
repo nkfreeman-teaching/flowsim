@@ -73,6 +73,104 @@ FAILURE_SCHEMA = {
 }
 
 
+# The run builds one record per row, and each record's fields equal its schema's
+# columns in order (tests check this). Slots make a misspelled field an error
+# rather than a silent extra key.
+@dataclass(
+    slots=True,
+    kw_only=True,
+)
+class _Customer:
+    customer_id: int
+    source: str
+    arrival_time: float
+    exit_time: float | None = None
+    flow_time: float | None = None
+    total_wait: float = 0.0
+    total_blocked: float = 0.0
+    admitted: bool = False
+    admission_time: float | None = None
+    outside_wait: float | None = None
+    status: str = "arriving"
+    station: str | None = None
+
+
+@dataclass(
+    slots=True,
+    kw_only=True,
+)
+class _Visit:
+    customer_id: int
+    source: str
+    station: str
+    arrival_time: float
+    service_start: float | None = None
+    service_end: float | None = None
+    departure_time: float | None = None
+    server_id: int | None = None
+    blocked_time: float | None = None
+    wait_time: float | None = None
+    service_time: float
+
+
+@dataclass(
+    slots=True,
+    kw_only=True,
+)
+class _State:
+    station: str
+    time: float
+    waiting: int
+    busy: int
+    processing: int
+    blocked: int
+    paused: int
+    down: int
+    scheduled: int
+    available: int
+    outside: int
+
+
+@dataclass(
+    slots=True,
+    kw_only=True,
+)
+class _Activity:
+    customer_id: int
+    station: str
+    server_id: int
+    state: str
+    start: float
+    end: float | None = None
+
+
+@dataclass(
+    slots=True,
+    kw_only=True,
+)
+class _Failure:
+    station: str
+    server_id: int
+    failure_time: float
+    time_to_failure: float
+    repair_time: float
+    repair_end: float | None = None
+
+
+def _frame(records: list, schema: dict[str, pl.DataType]) -> pl.DataFrame:
+    """Build a table from records, reading each column by its field name.
+
+    Polars would match dataclass fields to the schema by position and cast
+    mismatches silently, so the columns are gathered by name instead.
+    """
+    return pl.DataFrame(
+        data={
+            column: [getattr(record, column) for record in records] for column in schema
+        },
+        schema=schema,
+    )
+
+
 @dataclass(frozen=True)
 class Metric:
     """A replication metric: its table, its display label, and its kind.
@@ -231,43 +329,28 @@ def interval_estimate(values: np.ndarray, confidence: float) -> dict:
 class Results:
     def __init__(
         self,
-        customers: list[dict],
-        visits: list[dict],
-        states: list[dict],
-        activities: list[dict],
-        failures: list[dict],
+        customers: list[_Customer],
+        visits: list[_Visit],
+        states: list[_State],
+        activities: list[_Activity],
+        failures: list[_Failure],
         definitions: dict,
         capacities: dict[str, int],
         duration: float,
         end_time: float,
         drain: bool,
-        closing_states: dict[str, dict],
+        closing_states: dict[str, _State],
         warmup: float,
         time_unit: str,
         seed: int,
         graph: nx.DiGraph,
         definition: tuple,
     ):
-        self.customers = pl.DataFrame(
-            data=customers,
-            schema=CUSTOMER_SCHEMA,
-        )
-        self.visits = pl.DataFrame(
-            data=visits,
-            schema=VISIT_SCHEMA,
-        )
-        self.states = pl.DataFrame(
-            data=states,
-            schema=STATE_SCHEMA,
-        )
-        self.activities = pl.DataFrame(
-            data=activities,
-            schema=ACTIVITY_SCHEMA,
-        )
-        self.failures = pl.DataFrame(
-            data=failures,
-            schema=FAILURE_SCHEMA,
-        )
+        self.customers = _frame(customers, CUSTOMER_SCHEMA)
+        self.visits = _frame(visits, VISIT_SCHEMA)
+        self.states = _frame(states, STATE_SCHEMA)
+        self.activities = _frame(activities, ACTIVITY_SCHEMA)
+        self.failures = _frame(failures, FAILURE_SCHEMA)
         self.definitions = definitions
         self.capacities = capacities.copy()
         self.duration = duration
@@ -334,13 +417,13 @@ class Results:
                         & (pl.col("service_end") < self.duration)
                     ).height,
                     "wait_observations": waits.len(),
-                    "waiting_at_close": self.closing_states[name]["waiting"],
-                    "occupied_at_close": self.closing_states[name]["busy"],
+                    "waiting_at_close": self.closing_states[name].waiting,
+                    "occupied_at_close": self.closing_states[name].busy,
                     "waiting_at_end": history[-1]["waiting"],
                     "occupied_at_end": history[-1]["busy"],
-                    "blocked_at_close": self.closing_states[name]["blocked"],
-                    "paused_at_close": self.closing_states[name]["paused"],
-                    "outside_at_close": self.closing_states[name]["outside"],
+                    "blocked_at_close": self.closing_states[name].blocked,
+                    "paused_at_close": self.closing_states[name].paused,
+                    "outside_at_close": self.closing_states[name].outside,
                     "mean_wait": waits.mean(),
                     "p95_wait": waits.quantile(0.95, interpolation="linear"),
                     "mean_queue": queue_area / window,

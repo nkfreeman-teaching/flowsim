@@ -3,13 +3,14 @@
 import heapq
 import json
 import zlib
+from dataclasses import fields
 
 import numpy as np
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from flowsim import Model
+from flowsim import Model, results
 from tests.models import branching_service, deterministic_queue, service_network
 
 
@@ -702,3 +703,59 @@ def test_disabled_source_never_samples():
     )
     model.route([arrivals, station, model.exit])
     assert model.run(duration=5).customers.height == 0
+
+
+@pytest.mark.parametrize(
+    ("record", "schema"),
+    [
+        (results._Customer, results.CUSTOMER_SCHEMA),
+        (results._Visit, results.VISIT_SCHEMA),
+        (results._State, results.STATE_SCHEMA),
+        (results._Activity, results.ACTIVITY_SCHEMA),
+        (results._Failure, results.FAILURE_SCHEMA),
+    ],
+)
+def test_record_fields_equal_schema_columns(record, schema):
+    assert [field.name for field in fields(record)] == list(schema)
+
+
+def test_records_reject_misspelled_fields():
+    customer = results._Customer(
+        customer_id=1,
+        source="Customers",
+        arrival_time=0.0,
+    )
+    with pytest.raises(AttributeError):
+        customer.exit_tme = 2.0
+
+
+def test_record_tables_read_columns_by_name():
+    # By hand, each value belongs in the column of the same name, even though
+    # wait_time comes after server_id and blocked_time in the schema.
+    visit = results._Visit(
+        customer_id=4,
+        source="Customers",
+        station="Service",
+        arrival_time=1.0,
+        service_start=3.0,
+        service_end=5.5,
+        departure_time=6.0,
+        server_id=2,
+        blocked_time=0.5,
+        wait_time=2.0,
+        service_time=2.5,
+    )
+    row = results._frame([visit], results.VISIT_SCHEMA).row(0, named=True)
+    assert row == {
+        "customer_id": 4,
+        "source": "Customers",
+        "station": "Service",
+        "arrival_time": 1.0,
+        "service_start": 3.0,
+        "service_end": 5.5,
+        "departure_time": 6.0,
+        "server_id": 2,
+        "blocked_time": 0.5,
+        "wait_time": 2.0,
+        "service_time": 2.5,
+    }
