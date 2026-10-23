@@ -9,7 +9,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from flowsim.model import Node, sample
-from flowsim.results import _Activity, _Customer, _Failure, _State, _Visit
+from flowsim.results import (
+    Status,
+    _Activity,
+    _Customer,
+    _Failure,
+    _State,
+    _Visit,
+)
 from flowsim.scheduler import Event, Scheduler
 from flowsim.schedules import next_arrival
 from flowsim.station import _Station
@@ -240,7 +247,7 @@ class _Run:
                 ticket = next_ticket
         customer.exit_time = float(self.scheduler.now)
         customer.flow_time = self.scheduler.now - customer.arrival_time
-        customer.status = "completed"
+        customer.status = Status.COMPLETED
         customer.station = None
         self.complete_active()
 

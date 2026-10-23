@@ -11,11 +11,25 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from flowsim.model import Node, sample
-from flowsim.results import _Activity, _Customer, _Failure, _Visit
+from flowsim.results import (
+    Phase,
+    Status,
+    _Activity,
+    _Customer,
+    _Failure,
+    _Visit,
+)
 from flowsim.scheduler import SHIFT_PRIORITY, Event
 
 if TYPE_CHECKING:
     from flowsim.engine import _Run
+
+# A customer held by a server takes its status from the server's phase.
+PHASE_STATUS = {
+    Phase.PROCESSING: Status.IN_SERVICE,
+    Phase.BLOCKED: Status.BLOCKED,
+    Phase.PAUSED: Status.PAUSED,
+}
 
 
 @dataclass
@@ -36,7 +50,7 @@ class _Server:
         self.scheduled = identifier <= station.scheduled_level
         self.down = False
         self.ticket: _Ticket | None = None
-        self.phase = "idle"
+        self.phase = Phase.IDLE
         self.activity: _Activity | None = None
         self.changed = self.run.scheduler.event()
         self.failure_rng = np.random.default_rng(seeds[0])
@@ -60,7 +74,7 @@ class _Server:
         self.changed = self.run.scheduler.event()
         prior.succeed()
 
-    def set_phase(self, phase: str) -> None:
+    def set_phase(self, phase: Phase) -> None:
         if self.phase == phase:
             return
         now = float(self.run.scheduler.now)
@@ -68,7 +82,7 @@ class _Server:
             self.activity.end = now
         self.phase = phase
         self.activity = None
-        if self.ticket is not None and phase != "idle":
+        if self.ticket is not None and phase != Phase.IDLE:
             self.activity = _Activity(
                 customer_id=self.ticket.customer.customer_id,
                 station=self.station.node.name,
@@ -77,20 +91,18 @@ class _Server:
                 start=now,
             )
             self.run.activities.append(self.activity)
-            self.ticket.customer.status = (
-                "in_service" if phase == "processing" else phase
-            )
+            self.ticket.customer.status = PHASE_STATUS[phase]
         self.pulse()
 
     def sync_phase(self) -> None:
         if self.ticket is None:
-            self.set_phase("idle")
+            self.set_phase(Phase.IDLE)
         elif self.ticket.finished.triggered:
-            self.set_phase("blocked")
+            self.set_phase(Phase.BLOCKED)
         elif self.available:
-            self.set_phase("processing")
+            self.set_phase(Phase.PROCESSING)
         else:
-            self.set_phase("paused")
+            self.set_phase(Phase.PAUSED)
 
     def count_down(self, remaining: float, running: Callable[[], bool]):
         """Spend a duration only while a condition holds, waking on changes."""
@@ -126,7 +138,7 @@ class _Server:
                 running=lambda: (
                     self.available
                     if node.failure_clock == "available"
-                    else self.phase == "processing"
+                    else self.phase == Phase.PROCESSING
                 ),
             )
             self.down = True
@@ -210,9 +222,11 @@ class _Station:
         return {
             "waiting": len(self.waiting),
             "busy": sum(server.ticket is not None for server in self.servers),
-            "processing": sum(server.phase == "processing" for server in self.servers),
-            "blocked": sum(server.phase == "blocked" for server in self.servers),
-            "paused": sum(server.phase == "paused" for server in self.servers),
+            "processing": sum(
+                server.phase == Phase.PROCESSING for server in self.servers
+            ),
+            "blocked": sum(server.phase == Phase.BLOCKED for server in self.servers),
+            "paused": sum(server.phase == Phase.PAUSED for server in self.servers),
             "down": sum(server.down for server in self.servers),
             "scheduled": sum(server.scheduled for server in self.servers),
             "available": sum(server.available for server in self.servers),
@@ -235,13 +249,13 @@ class _Station:
             self.place(ticket)
             self.dispatch()
         elif external and self.node.external_overflow == "reject":
-            customer.status = "rejected"
+            customer.status = Status.REJECTED
             customer.station = self.node.name
             return None
         else:
             self.pending.append(ticket)
             if external:
-                customer.status = "outside"
+                customer.status = Status.OUTSIDE
                 customer.station = self.node.name
             self.check_drain()
         self.run.observe(self.node.name)
@@ -268,7 +282,7 @@ class _Station:
         )
         self.run.visits.append(ticket.visit)
         customer.station = self.node.name
-        customer.status = "waiting"
+        customer.status = Status.WAITING
         self.waiting.append(ticket)
         ticket.admitted.succeed()
 
@@ -298,7 +312,7 @@ class _Station:
         server = ticket.server
         yield from server.count_down(
             remaining=ticket.visit.service_time,
-            running=lambda: server.phase == "processing",
+            running=lambda: server.phase == Phase.PROCESSING,
         )
         ticket.visit.service_end = float(self.run.scheduler.now)
         ticket.finished.succeed()
@@ -334,7 +348,7 @@ class _Station:
             )
         )
         paused = self.node.shift_end != "finish" and any(
-            server.phase == "paused" for server in self.servers
+            server.phase == Phase.PAUSED for server in self.servers
         )
         if not future and (self.waiting or self.pending or paused):
             raise RuntimeError(
@@ -342,7 +356,7 @@ class _Station:
             )
         for server in self.servers:
             if (
-                server.phase == "paused"
+                server.phase == Phase.PAUSED
                 and not server.scheduled
                 and self.node.shift_end == "pause"
                 and not any(

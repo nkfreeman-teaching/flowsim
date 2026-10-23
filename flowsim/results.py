@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -73,6 +74,28 @@ FAILURE_SCHEMA = {
 }
 
 
+class Status(StrEnum):
+    """A customer's status, as written to the customers table."""
+
+    ARRIVING = "arriving"
+    OUTSIDE = "outside"
+    WAITING = "waiting"
+    IN_SERVICE = "in_service"
+    BLOCKED = "blocked"
+    PAUSED = "paused"
+    REJECTED = "rejected"
+    COMPLETED = "completed"
+
+
+class Phase(StrEnum):
+    """A server's phase. Activity rows record every phase except idle."""
+
+    IDLE = "idle"
+    PROCESSING = "processing"
+    BLOCKED = "blocked"
+    PAUSED = "paused"
+
+
 # The run builds one record per row, and each record's fields equal its schema's
 # columns in order (tests check this). Slots make a misspelled field an error
 # rather than a silent extra key.
@@ -91,7 +114,7 @@ class _Customer:
     admitted: bool = False
     admission_time: float | None = None
     outside_wait: float | None = None
-    status: str = "arriving"
+    status: Status = Status.ARRIVING
     station: str | None = None
 
 
@@ -139,7 +162,7 @@ class _Activity:
     customer_id: int
     station: str
     server_id: int
-    state: str
+    state: Phase
     start: float
     end: float | None = None
 
@@ -476,9 +499,9 @@ class Results:
         )
 
     def _system_metrics(self) -> pl.DataFrame:
-        eligible = self.customers.filter(pl.col("status") != "rejected")
+        eligible = self.customers.filter(pl.col("status") != Status.REJECTED)
         cohort = eligible.filter(pl.col("arrival_time") >= self.warmup)
-        finished = cohort.filter(pl.col("status") == "completed")
+        finished = cohort.filter(pl.col("status") == Status.COMPLETED)
         completed = eligible.get_column("exit_time").count()
         rejected = self.customers.height - eligible.height
         exits = self.customers.filter(
@@ -530,7 +553,7 @@ class Results:
                 # own time in [warmup, duration), as measurement_completions does.
                 "measurement_rejected": [
                     self.customers.filter(
-                        (pl.col("status") == "rejected")
+                        (pl.col("status") == Status.REJECTED)
                         & (pl.col("arrival_time") >= self.warmup)
                     ).height
                 ],

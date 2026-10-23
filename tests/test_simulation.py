@@ -759,3 +759,42 @@ def test_record_tables_read_columns_by_name():
         "wait_time": 2.0,
         "service_time": 2.5,
     }
+
+
+def test_statuses_and_phases_use_their_enumerations():
+    # By hand: arrivals at 0, 1, 2, and 3. Customer 1 uses Prep from 0 to 1 and
+    # starts Finish at 1. Customer 2 uses Prep from 1 to 2, then stays blocked
+    # because Finish is busy until 4 and has no buffer. Customers 3 and 4 wait.
+    model = Model()
+    arrivals = model.source(
+        name="Customers",
+        interarrival=1,
+        first_arrival=0,
+        limit=4,
+    )
+    prep = model.station(
+        name="Prep",
+        capacity=1,
+        service_time=1,
+    )
+    finish = model.station(
+        name="Finish",
+        capacity=1,
+        service_time=3,
+        buffer=0,
+        external_overflow="wait",
+    )
+    model.route([arrivals, prep, finish, model.exit])
+    result = model.run(duration=3.5)
+    assert result.customers.get_column("status").to_list() == [
+        results.Status.IN_SERVICE,
+        results.Status.BLOCKED,
+        results.Status.WAITING,
+        results.Status.WAITING,
+    ]
+    assert result.activities.rows() == [
+        (1, "Prep", 1, results.Phase.PROCESSING, 0.0, 1.0),
+        (1, "Finish", 1, results.Phase.PROCESSING, 1.0, None),
+        (2, "Prep", 1, results.Phase.PROCESSING, 1.0, 2.0),
+        (2, "Prep", 1, results.Phase.BLOCKED, 2.0, None),
+    ]
