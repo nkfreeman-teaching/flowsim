@@ -42,8 +42,8 @@ outputs.
 | 1.2 | Decimal times leave a tiny remainder that pauses finished work | `flowsim/station.py:94-108` | Opus | Yes, rare runs | done (aeb84a2) |
 | 1.3 | A non-advancing failure and repair cycle hangs the run | `flowsim/station.py:110-151`, `engine.py:105-124` | Codex | Error instead of hang | done (7366e30) |
 | 1.4 | Make "shift changes first" an explicit priority and fix the tie-order wording | `scheduler.py`, `engine.py:18-23`, `station.py:173-180`, README, AGENTS.md | Opus, Sonnet | None expected | done (de9689a) |
-| 1.5 | Add the missing tie-order and shared-admission tests | `tests/`, README | Sonnet, Opus | None | done |
-| 1.6 | Give validation tests a `match` | `tests/test_extensions.py:483`, `:503` | Opus | None | open |
+| 1.5 | Add the missing tie-order and shared-admission tests | `tests/`, README | Sonnet, Opus | None | done (7569926) |
+| 1.6 | Give validation tests a `match` | `tests/test_extensions.py:483`, `:503` | Opus | None | done |
 
 **1.1.** Both `mo.iframe(html=results.viewer())` cells (`examples/lesson.py:129-134`, `:348-353`)
 exceed Marimo's default output limit of 8,000,000 bytes, so students see a warning in place of

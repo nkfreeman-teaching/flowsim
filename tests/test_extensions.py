@@ -682,17 +682,17 @@ def test_servers_have_independent_reproducible_failure_streams():
 
 
 @pytest.mark.parametrize(
-    "points",
+    "points,message",
     [
-        [],
-        [(1, 1)],
-        [(0, -1)],
-        [(0, 1), (0, 2)],
-        [(0, 1), (5, 1), (4, 2)],
+        ([], "at least one time and value pair"),
+        ([(1, 1)], "must begin at time zero"),
+        ([(0, -1)], "rate must be finite and at least zero, not -1"),
+        ([(0, 1), (0, 2)], "change times must increase strictly"),
+        ([(0, 1), (5, 1), (4, 2)], "change times must increase strictly"),
     ],
 )
-def test_invalid_rate_schedules(points):
-    with pytest.raises(ValueError):
+def test_invalid_rate_schedules(points, message):
+    with pytest.raises(ValueError, match=message):
         Model().source(
             name="Customers",
             rates=points,
@@ -700,17 +700,29 @@ def test_invalid_rate_schedules(points):
 
 
 @pytest.mark.parametrize(
-    "options",
+    "options,message",
     [
-        {"staffing": [(0, 1)]},
-        {"staffing": [(0, 2)], "shift_end": "finish"},
-        {"buffer": 0},
-        {"buffer": -1, "external_overflow": "wait"},
-        {"time_to_failure": 1},
-        {"time_to_failure": 1, "repair_time": 1},
-        {"time_to_failure": 0, "repair_time": 1, "failure_clock": "busy"},
+        ({"staffing": [(0, 1)]}, "Scheduled staffing requires shift_end"),
+        (
+            {"staffing": [(0, 2)], "shift_end": "finish"},
+            "cannot exceed installed capacity 1",
+        ),
+        ({"buffer": 0}, "A finite buffer requires external_overflow"),
+        (
+            {"buffer": -1, "external_overflow": "wait"},
+            "Buffer capacity must be an integer of at least 0",
+        ),
+        ({"time_to_failure": 1}, "Provide both time_to_failure and repair_time"),
+        (
+            {"time_to_failure": 1, "repair_time": 1},
+            "Failures require failure_clock",
+        ),
+        (
+            {"time_to_failure": 0, "repair_time": 1, "failure_clock": "busy"},
+            "Time to failure must be finite and greater than zero, not 0",
+        ),
     ],
 )
-def test_advanced_rules_are_explicit_and_validated(options):
-    with pytest.raises(ValueError):
+def test_advanced_rules_are_explicit_and_validated(options, message):
+    with pytest.raises(ValueError, match=message):
         single_station(**options)
