@@ -114,6 +114,7 @@ class _Server:
     def failures(self):
         node = self.station.node
         while True:
+            cycle_start = self.run.scheduler.now
             lifetime = sample(
                 distribution=node.time_to_failure,
                 rng=self.failure_rng,
@@ -153,6 +154,19 @@ class _Server:
             self.pulse()
             self.station.dispatch()
             self.run.observe(node.name)
+            # A cycle that leaves the clock unchanged repeats forever. From time
+            # 0, a cycle too small to move the clock at the duration creeps
+            # forward in steps that cannot reach it.
+            duration = self.run.duration
+            if (
+                self.run.scheduler.now == cycle_start
+                or duration + (lifetime + repair) == duration
+            ):
+                raise ValueError(
+                    f"Time to failure {lifetime!r} and repair time {repair!r} at "
+                    f"{node.name!r}, server {self.id}, are too small for the "
+                    f"simulation clock to advance in a run of duration {duration!r}."
+                )
 
 
 class _Station:

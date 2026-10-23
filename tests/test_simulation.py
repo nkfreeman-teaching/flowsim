@@ -513,12 +513,15 @@ def test_every_station_records_server_identity():
     assert visits.get_column("server_id").to_list() == [1, 2, 1]
 
 
-def test_interarrival_too_small_for_the_clock_raises():
+@pytest.mark.parametrize("first_arrival", [0, 1])
+def test_interarrival_too_small_for_the_clock_raises(first_arrival):
+    # From 1, 1 + 1e-100 rounds to 1. From 0, arrivals creep forward by 1e-100
+    # and would need about 2e100 of them to reach the duration of 2.
     model = Model()
     arrivals = model.source(
         name="Customers",
         interarrival=1e-100,
-        first_arrival=1,
+        first_arrival=first_arrival,
     )
     station = model.station(
         name="Service",
@@ -526,7 +529,13 @@ def test_interarrival_too_small_for_the_clock_raises():
         service_time=1,
     )
     model.route([arrivals, station, model.exit])
-    with pytest.raises(ValueError, match="too small for the simulation clock"):
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"Interarrival time 1e-100 at 'Customers' is too small for the "
+            r"simulation clock to advance in a run of duration 2"
+        ),
+    ):
         model.run(duration=2)
 
 

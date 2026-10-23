@@ -39,8 +39,8 @@ outputs.
 | # | Change | Where | Found by | Outputs | Status |
 |---|---|---|---|---|---|
 | 1.1 | Lesson viewers replaced by Marimo size warnings | `pyproject.toml`, `pixi.toml` | Codex | Lesson display only | done (f581522) |
-| 1.2 | Decimal times leave a tiny remainder that pauses finished work | `flowsim/station.py:94-108` | Opus | Yes, rare runs | done |
-| 1.3 | A non-advancing failure and repair cycle hangs the run | `flowsim/station.py:110-151` | Codex | Error instead of hang | open |
+| 1.2 | Decimal times leave a tiny remainder that pauses finished work | `flowsim/station.py:94-108` | Opus | Yes, rare runs | done (aeb84a2) |
+| 1.3 | A non-advancing failure and repair cycle hangs the run | `flowsim/station.py:110-151`, `engine.py:105-124` | Codex | Error instead of hang | done |
 | 1.4 | Make "shift changes first" an explicit priority and fix the tie-order wording | `scheduler.py`, `engine.py:18-23`, `station.py:173-180`, README, AGENTS.md | Opus, Sonnet | None expected | open |
 | 1.5 | Add the missing tie-order and shared-admission tests | `tests/` | Sonnet, Opus | None | open |
 | 1.6 | Give validation tests a `match` | `tests/test_extensions.py:483`, `:503` | Opus | None | open |
@@ -78,6 +78,11 @@ repair lands on the same timestamp forever. Fix: in `_Server.failures`, raise a 
 the station and server when a whole failure and repair cycle leaves the clock unchanged. This
 follows the existing interarrival guard at `engine.py:284-288`. A single tiny random lifetime
 followed by a positive repair stays valid. Test: the model above raises with a clear message.
+Extended (owner decision 2026-10-23): without a schedule the machine starts at 0, where each cycle
+moves the clock by 1e-100 and the same-timestamp check never fires (120,423 cycles in 3 seconds
+reached 1.2e-95). The interarrival guard had the same gap for `interarrival=1e-100` from time 0.
+Both guards now also raise when the cycle or the interarrival cannot advance the clock from the
+run's duration, i.e., `duration + gap == duration`.
 Pain: Codex rated it 4, and the main session rates it 2, because it needs a lifetime below clock
 resolution and a zero repair together. Treated as 4 until resolved, since a hang in class gives no
 feedback at all.

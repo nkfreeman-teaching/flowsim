@@ -351,6 +351,66 @@ def test_failure_clocks_differ_during_idle_time(clock, start, end):
     assert result.end_time == end
 
 
+@pytest.mark.parametrize("staffing", [None, [(0, 0), (1, 1)]])
+def test_failure_cycle_too_small_for_the_clock_raises(staffing):
+    # Without a schedule the machine starts at 0, and each cycle moves the clock
+    # by 1e-100, which would take about 3e100 cycles to reach 3. With a
+    # schedule it starts at 1, where 1 + 1e-100 rounds to 1, so each cycle would
+    # land on the same time forever.
+    model = Model()
+    source = model.source(
+        name="Parts",
+        interarrival=1,
+        first_arrival=0,
+        limit=1,
+    )
+    station = model.station(
+        name="Machine",
+        capacity=1,
+        service_time=2,
+        staffing=staffing,
+        shift_end=None if staffing is None else "pause",
+        time_to_failure=1e-100,
+        repair_time=0,
+        failure_clock="available",
+    )
+    model.route([source, station, model.exit])
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"Time to failure 1e-100 and repair time 0\.0 at 'Machine', server 1, "
+            r"are too small for the simulation clock to advance in a run of "
+            r"duration 3"
+        ),
+    ):
+        model.run(duration=3)
+
+
+def test_tiny_lifetime_with_a_positive_repair_still_runs():
+    # The first failure is at 0 + 1e-100. Each repair of 1 then moves the clock,
+    # so later failures land at 1 + 1e-100 = 1 and 2 + 1e-100 = 2, and the
+    # repair that would end at 3 is unfinished when the run stops.
+    model = Model()
+    source = model.source(
+        name="Parts",
+        interarrival=1,
+        first_arrival=0,
+        limit=1,
+    )
+    station = model.station(
+        name="Machine",
+        capacity=1,
+        service_time=2,
+        time_to_failure=1e-100,
+        repair_time=1,
+        failure_clock="available",
+    )
+    model.route([source, station, model.exit])
+    failures = model.run(duration=3).failures
+    assert failures.get_column("failure_time").to_list() == [1e-100, 1.0, 2.0]
+    assert failures.get_column("repair_end").to_list() == [1.0, 2.0, None]
+
+
 def test_failed_off_shift_server_can_finish_its_existing_job_after_repair():
     result = single_station(
         staffing=[(0, 1), (1, 0)],

@@ -111,16 +111,19 @@ class _Run:
                 horizon=self.duration,
                 rng=rng,
             )
-        arrival = now + sample(
+        gap = sample(
             distribution=node.duration,
             rng=rng,
             label=f"Interarrival time at {node.name!r}",
             positive=True,
         )
-        if arrival <= now:
+        arrival = now + gap
+        # From time 0, a gap too small to move the clock at the duration
+        # creeps forward in steps that cannot reach it.
+        if arrival <= now or self.duration + gap == self.duration:
             raise ValueError(
-                f"Interarrival time at {node.name!r} is too small for the "
-                f"simulation clock to advance from {now!r}."
+                f"Interarrival time {gap!r} at {node.name!r} is too small for the "
+                f"simulation clock to advance in a run of duration {self.duration!r}."
             )
         return arrival
 
