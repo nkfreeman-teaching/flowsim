@@ -254,15 +254,14 @@ def test_missing_outcomes_exclude_matched_pairs_and_report_the_count():
         ("One server", [1, None, 3, 4, 5]),
         ("Two servers", [2, 20, None, 8, 10]),
     ]:
-        result.experiments[name].summary = result.experiments[
-            name
-        ].summary.with_columns(
-            pl.Series(
-                name="mean_total_wait",
-                values=values,
-                dtype=pl.Float64,
+        for run, value in zip(result.experiments[name].runs, values):
+            run.summary = run.summary.with_columns(
+                pl.Series(
+                    name="mean_total_wait",
+                    values=[value],
+                    dtype=pl.Float64,
+                )
             )
-        )
     intervals = result.intervals()
     assert intervals.get_column("observed_runs").to_list() == [4, 4]
     differences = result.differences().to_dicts()[0]
@@ -281,14 +280,17 @@ def test_comparison_rejects_missing_duplicate_and_unpaired_replications():
         drain=True,
     )
     second = result.experiments["Two"]
-    original = second.summary
-    second.summary = original.filter(pl.col("replication") != 2)
+    # A hand-edited run table without exactly one row would otherwise
+    # misalign the paired replications.
+    run = second.runs[1]
+    original = run.summary
+    run.summary = original.clear()
     with pytest.raises(ValueError, match="missing or duplicate"):
         result.differences()
-    second.summary = original.with_columns(pl.lit(1).alias("replication"))
+    run.summary = pl.concat([original, original])
     with pytest.raises(ValueError, match="missing or duplicate"):
         result.intervals()
-    second.summary = original
+    run.summary = original
     second.runs[0].seed += 1
     with pytest.raises(ValueError, match="identical replication seeds"):
         result.differences()
@@ -484,9 +486,9 @@ def test_comparison_outputs_accept_a_baseline_and_read_current_tables(tmp_path):
     assert differences.get_column("scenario").to_list() == ["One"]
     assert differences.get_column("mean").to_list() == [1]
     assert "Difference from Two" in result.viewer(baseline="Two")
-    # Tables built for export follow edits to the underlying experiments.
-    first = result.experiments["One"]
-    first.summary = first.summary.with_columns(pl.lit(99.0).alias("mean_total_wait"))
+    # Tables built for export follow edits to the underlying runs.
+    for run in result.experiments["One"].runs:
+        run.summary = run.summary.with_columns(pl.lit(99.0).alias("mean_total_wait"))
     assert set(
         result.summary.filter(pl.col("scenario") == "One")["mean_total_wait"]
     ) == {99.0}

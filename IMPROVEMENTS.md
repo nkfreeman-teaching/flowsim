@@ -174,8 +174,8 @@ literals survive polars formatting changes.
 
 | # | Change | Where | Found by | Outputs | Status |
 |---|---|---|---|---|---|
-| 3.1 | `Experiment` accepts runs from different models | `results.py:505-531`, `engine.py` | Codex, Sonnet | Mixed runs now raise | done |
-| 3.2 | Build `Experiment` tables from its runs on access | `results.py:532-564`, tests | Sonnet | None | open |
+| 3.1 | `Experiment` accepts runs from different models | `results.py:505-531`, `engine.py` | Codex, Sonnet | Mixed runs now raise | done (605bbc2) |
+| 3.2 | Build `Experiment` tables from its runs on access | `results.py:532-564`, tests | Sonnet | None | done |
 | 3.3 | Share the settings check and metadata writer | `results.py`, `comparison.py` | Opus | Error text only | open |
 
 **3.1.** Checked: `Experiment([...])` pooled a service-time-1 model and a service-time-9 model as
@@ -188,7 +188,9 @@ different lambdas are refused, which is the safe direction. Test: the two-model 
 **3.2.** `Experiment.stations` and `.summary` are copies made in `__init__`, and tests mutate them
 (`tests/test_service_day.py:257`, `:285-291`, `:448`) to reach the missing-replication guard in
 `_values`. Make both properties over `self.runs`, move those tests to patch `run.summary`, and
-remove the guard if it becomes unreachable.
+remove the guard if it becomes unreachable. Decision: the guard stays (owner, 2026-10-23).
+FlowSim always builds one summary row per run, but a caller who reassigns `run.summary` with
+zero rows would otherwise get a length-1 array that broadcasts silently in `differences()`.
 
 **3.3.** `results.py:518-531` and `comparison.py:37-47` each define a `settings()` tuple, both
 check station existence, and both write `metadata.json` with their own version stamp. Add one

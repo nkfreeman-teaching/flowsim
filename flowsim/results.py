@@ -577,22 +577,30 @@ class Experiment:
                 "different objects, so run every replication from one Model."
             )
         self.runs = runs
-        self.stations = pl.concat(
+
+    # The pooled tables are built from the runs on each access, so estimates
+    # and exports always read the runs' current values.
+    @property
+    def stations(self) -> pl.DataFrame:
+        return pl.concat(
             [
                 run.stations.select(
                     pl.lit(index).alias("replication"),
                     pl.all(),
                 )
-                for index, run in enumerate(runs, start=1)
+                for index, run in enumerate(self.runs, start=1)
             ]
         )
-        self.summary = pl.concat(
+
+    @property
+    def summary(self) -> pl.DataFrame:
+        return pl.concat(
             [
                 run.summary.select(
                     pl.lit(index).alias("replication"),
                     pl.all(),
                 )
-                for index, run in enumerate(runs, start=1)
+                for index, run in enumerate(self.runs, start=1)
             ]
         )
 
