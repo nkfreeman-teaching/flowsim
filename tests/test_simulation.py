@@ -956,3 +956,55 @@ def test_limited_source_stops_sampling_at_its_limit(
     customers = model.run(duration=10).customers
     assert customers.get_column("arrival_time").to_list() == expected_arrivals
     assert len(draws) == expected_draws
+
+
+def test_outside_count_excludes_blocked_transfers():
+    # By hand: walk-in 1 starts Finish at 0.5 and ends at 3.5. The Prep customer
+    # finishes Prep at 1 and waits for Finish as a blocked transfer, which is not
+    # outside. Walk-in 2 arrives at 1.5 and waits outside. At 3.5 the transfer
+    # enters first, in request order, and ends at 6.5, when walk-in 2 enters.
+    model = Model()
+    prepared = model.source(
+        name="Prepared",
+        interarrival=10,
+        first_arrival=0,
+        limit=1,
+    )
+    walk_ins = model.source(
+        name="Walk-ins",
+        interarrival=1,
+        first_arrival=0.5,
+        limit=2,
+    )
+    prep = model.station(
+        name="Prep",
+        capacity=1,
+        service_time=1,
+    )
+    finish = model.station(
+        name="Finish",
+        capacity=1,
+        service_time=3,
+        buffer=0,
+        external_overflow="wait",
+    )
+    model.route([prepared, prep, finish, model.exit])
+    model.route([walk_ins, finish])
+    result = model.run(duration=10)
+    states = result.states.filter(pl.col("station") == "Finish")
+    assert states.select("time", "outside").rows() == [
+        (0.0, 0),
+        (0.5, 0),
+        (1.0, 0),
+        (1.5, 1),
+        (3.5, 1),
+        (6.5, 0),
+        (9.5, 0),
+        (10.0, 0),
+    ]
+    visits = result.visits.filter(pl.col("station") == "Finish")
+    assert visits.select("customer_id", "service_start").rows() == [
+        (2, 0.5),
+        (1, 3.5),
+        (3, 6.5),
+    ]

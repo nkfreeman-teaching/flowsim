@@ -209,6 +209,8 @@ class _Station:
         self.waiting: deque[_Ticket] = deque()
         self.drain_check_pending = False
         self.pending: deque[_Ticket] = deque()
+        # Outside arrivals in the pending queue, as opposed to blocked transfers.
+        self.outside = 0
         seeds = seed.spawn(2 * node.capacity)
         self.servers = [
             _Server(
@@ -238,18 +240,26 @@ class _Station:
             self.run.observe(self.node.name)
 
     def state(self) -> dict:
+        """Count customers and servers in each condition, visiting each server once."""
+        busy = processing = blocked = paused = down = scheduled = available = 0
+        for server in self.servers:
+            busy += server.ticket is not None
+            processing += server.phase == Phase.PROCESSING
+            blocked += server.phase == Phase.BLOCKED
+            paused += server.phase == Phase.PAUSED
+            down += server.down
+            scheduled += server.scheduled
+            available += server.available
         return {
             "waiting": len(self.waiting),
-            "busy": sum(server.ticket is not None for server in self.servers),
-            "processing": sum(
-                server.phase == Phase.PROCESSING for server in self.servers
-            ),
-            "blocked": sum(server.phase == Phase.BLOCKED for server in self.servers),
-            "paused": sum(server.phase == Phase.PAUSED for server in self.servers),
-            "down": sum(server.down for server in self.servers),
-            "scheduled": sum(server.scheduled for server in self.servers),
-            "available": sum(server.available for server in self.servers),
-            "outside": sum(ticket.external for ticket in self.pending),
+            "busy": busy,
+            "processing": processing,
+            "blocked": blocked,
+            "paused": paused,
+            "down": down,
+            "scheduled": scheduled,
+            "available": available,
+            "outside": self.outside,
         }
 
     def room(self) -> bool:
@@ -274,6 +284,7 @@ class _Station:
         else:
             self.pending.append(ticket)
             if external:
+                self.outside += 1
                 customer.status = Status.OUTSIDE
                 customer.station = self.node.name
             self.check_drain()
@@ -321,7 +332,9 @@ class _Station:
                 self.run.scheduler.process(self.work(ticket))
                 continue
             if self.pending and self.room():
-                self.place(self.pending.popleft())
+                ticket = self.pending.popleft()
+                self.outside -= ticket.external
+                self.place(ticket)
                 continue
             break
         self.check_drain()

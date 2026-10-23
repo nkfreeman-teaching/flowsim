@@ -213,8 +213,8 @@ tolerance of 1e-12.
 | 4.5 | Move `number`, `integer`, `sample` to a leaf module and hoist local imports | new `flowsim/validation.py`, all modules | Sonnet | open |
 | 4.6 | Document `_Station` and `_Server`, and share one future-staffing helper | `station.py:154-348` | Sonnet, suite | done (509a466) |
 | 4.7 | Remove the unreachable "arriving" status | `engine.py:155` | Opus, Sonnet | done (e9c726d) |
-| 4.8 | Drop the redundant limit clause in the source loop | `engine.py:129-139` | Sonnet | done |
-| 4.9 | Compute station state in one pass, and count outside tickets with a counter | `station.py:193-204` | Opus, Codex | open |
+| 4.8 | Drop the redundant limit clause in the source loop | `engine.py:129-139` | Sonnet | done (6d905bc) |
+| 4.9 | Compute station state in one pass, and count outside tickets with a counter | `station.py:193-204` | Opus, Codex | done |
 | 4.10 | Compute time-weighted station areas in polars and split the count metrics out | `results.py:246-354` | Opus, Sonnet | open |
 | 4.11 | Expand calls to the keyword layout rule in touched files | all touched files | Codex | open |
 
