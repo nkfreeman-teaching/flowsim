@@ -242,11 +242,8 @@ class _Run:
         if arrival is None:
             arrival = self.next_arrival_time(node, rng)
         produced = 0
-        while (
-            arrival is not None
-            and arrival < self.duration
-            and (node.limit is None or produced < node.limit)
-        ):
+        # The limit is checked after each arrival, before sampling another gap.
+        while arrival is not None and arrival < self.duration:
             yield self.scheduler.timeout(
                 arrival - self.scheduler.now,
                 priority=ARRIVAL_PRIORITY,

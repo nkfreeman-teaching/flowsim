@@ -921,3 +921,38 @@ def test_every_customer_has_a_status_from_the_arrival_instant():
         "rejected",
         "completed",
     ]
+
+
+@pytest.mark.parametrize(
+    ("first_arrival", "expected_arrivals", "expected_draws"),
+    [(None, [1, 2, 3], 3), (0, [0, 1, 2], 2)],
+)
+def test_limited_source_stops_sampling_at_its_limit(
+    first_arrival,
+    expected_arrivals,
+    expected_draws,
+):
+    # By hand: gaps of 1 and a limit of 3. A sampled first arrival takes one
+    # draw and each later arrival one more, and no gap follows the third.
+    draws = []
+
+    def gap(rng):
+        draws.append(1)
+        return 1
+
+    model = Model()
+    arrivals = model.source(
+        name="Customers",
+        interarrival=gap,
+        first_arrival=first_arrival,
+        limit=3,
+    )
+    station = model.station(
+        name="Service",
+        capacity=1,
+        service_time=0,
+    )
+    model.route([arrivals, station, model.exit])
+    customers = model.run(duration=10).customers
+    assert customers.get_column("arrival_time").to_list() == expected_arrivals
+    assert len(draws) == expected_draws
