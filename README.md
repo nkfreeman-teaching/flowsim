@@ -278,7 +278,9 @@ The overflow rule is required with a finite buffer and applies to arrivals from
 a source. `external_overflow="reject"` records a rejected arrival when the first
 station has no room. `external_overflow="wait"` holds the arrival in a separate
 outside queue until admission is possible, and that queue does not use the
-inside buffer. `arrivals` counts attempts, with
+inside buffer. Outside arrivals and blocked transfers from upstream stations
+wait in one admission line, and the station admits them in the order they asked
+to enter. `arrivals` counts attempts, with
 `arrivals = completed + remaining + rejected`. `admitted` counts successful
 admissions to the network, and `admitted_at_close` excludes later admissions.
 `remaining_at_close` includes unfinished outside customers, and

@@ -255,6 +255,131 @@ def test_external_waiting_is_separate_from_inside_queue_and_wip():
     assert result.stations.to_dicts()[0]["mean_outside_queue"] == 1
 
 
+def test_shift_start_precedes_an_arrival_at_the_same_time():
+    # The server starts at 5 and the only customer arrives at 5. With no
+    # waiting room, the customer is served only if the shift change runs first.
+    model = Model()
+    source = model.source(
+        name="Customers",
+        interarrival=1,
+        first_arrival=5,
+        limit=1,
+    )
+    station = model.station(
+        name="Service",
+        capacity=1,
+        service_time=1,
+        staffing=[(0, 0), (5, 1)],
+        shift_end="finish",
+        buffer=0,
+        external_overflow="reject",
+    )
+    model.route([source, station, model.exit])
+    result = model.run(
+        duration=6,
+        drain=True,
+    )
+    assert result.customers.get_column("status").to_list() == ["completed"]
+    assert result.visits.get_column("service_start").to_list() == [5]
+    assert result.visits.get_column("service_end").to_list() == [6]
+
+
+def test_repair_end_precedes_an_arrival_at_the_same_time():
+    # The server fails at 1 and is repaired at 1 + 2 = 3, when the only
+    # customer arrives. Service runs from 3 to 3.5, before the next failure at
+    # 3 + 1 = 4.
+    model = Model()
+    source = model.source(
+        name="Parts",
+        interarrival=1,
+        first_arrival=3,
+        limit=1,
+    )
+    station = model.station(
+        name="Machine",
+        capacity=1,
+        service_time=0.5,
+        buffer=0,
+        external_overflow="reject",
+        time_to_failure=1,
+        repair_time=2,
+        failure_clock="available",
+    )
+    model.route([source, station, model.exit])
+    result = model.run(duration=4)
+    assert result.failures.row(0, named=True)["failure_time"] == 1
+    assert result.failures.row(0, named=True)["repair_end"] == 3
+    assert result.customers.get_column("status").to_list() == ["completed"]
+    assert result.visits.get_column("service_start").to_list() == [3]
+    assert result.visits.get_column("service_end").to_list() == [3.5]
+
+
+@pytest.mark.parametrize(
+    "walk_in_gap,finish_order,second_walk_in_wait,press_blocked",
+    [
+        # The press part asks for Finish at 1, before the walk-in at 2.
+        (2, ["Walk-ins", "Line", "Walk-ins"], 6 - 2, 3 - 1),
+        # The walk-in at 0.5 asks before the press part at 1.
+        (0.5, ["Walk-ins", "Walk-ins", "Line"], 3 - 0.5, 6 - 1),
+    ],
+)
+def test_outside_arrivals_and_blocked_transfers_share_one_admission_line(
+    walk_in_gap,
+    finish_order,
+    second_walk_in_wait,
+    press_blocked,
+):
+    # A walk-in occupies Finish from 0 to 3, and Press finishes a part at 1.
+    # Finish has no waiting room, so the part and the second walk-in wait in
+    # one line and enter Finish at 3 and 6 in the order they asked.
+    model = Model()
+    line = model.source(
+        name="Line",
+        interarrival=1,
+        first_arrival=0,
+        limit=1,
+    )
+    walk_ins = model.source(
+        name="Walk-ins",
+        interarrival=walk_in_gap,
+        first_arrival=0,
+        limit=2,
+    )
+    press = model.station(
+        name="Press",
+        capacity=1,
+        service_time=1,
+    )
+    finish = model.station(
+        name="Finish",
+        capacity=1,
+        service_time=3,
+        buffer=0,
+        external_overflow="wait",
+    )
+    model.route([line, press, finish, model.exit])
+    model.route([walk_ins, finish, model.exit])
+    result = model.run(
+        duration=4,
+        drain=True,
+    )
+    finish_visits = result.visits.filter(pl.col("station") == "Finish").sort(
+        "service_start"
+    )
+    assert finish_visits.get_column("source").to_list() == finish_order
+    assert finish_visits.get_column("service_start").to_list() == [0, 3, 6]
+    walk_in_waits = (
+        result.customers.filter(pl.col("source") == "Walk-ins")
+        .sort("arrival_time")
+        .get_column("outside_wait")
+        .to_list()
+    )
+    assert walk_in_waits == [0, second_walk_in_wait]
+    press_visit = result.visits.filter(pl.col("station") == "Press")
+    assert press_visit.get_column("blocked_time").to_list() == [press_blocked]
+    assert result.summary.to_dicts()[0]["completed"] == 3
+
+
 def test_blocking_holds_upstream_machine_until_downstream_admission():
     model = Model()
     source = model.source(
