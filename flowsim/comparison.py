@@ -119,7 +119,10 @@ class Comparison:
                     "confidence": level,
                 }
             )
-        return interval_frame(rows)
+        return interval_frame(
+            rows=rows,
+            keys=["scenario", "metric", "station"],
+        )
 
     def differences(
         self,
@@ -161,7 +164,10 @@ class Comparison:
                     "confidence": level,
                 }
             )
-        return interval_frame(rows)
+        return interval_frame(
+            rows=rows,
+            keys=["scenario", "baseline", "metric", "station"],
+        )
 
     def plot(
         self,

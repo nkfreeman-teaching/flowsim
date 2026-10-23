@@ -156,15 +156,30 @@ def confidence_level(value: float) -> float:
     return level
 
 
-def interval_frame(rows: list[dict]) -> pl.DataFrame:
+INTERVAL_SCHEMA = {
+    "scenario": pl.String,
+    "baseline": pl.String,
+    "station": pl.String,
+    "metric": pl.String,
+    "runs": pl.Int64,
+    "observed_runs": pl.Int64,
+    "mean": pl.Float64,
+    "lower": pl.Float64,
+    "upper": pl.Float64,
+    "confidence": pl.Float64,
+}
+
+
+def interval_frame(rows: list[dict], keys: list[str]) -> pl.DataFrame:
+    """Build an interval table whose columns exist even when it has no rows.
+
+    The keys name the identifying columns in display order, and the estimate
+    columns from "runs" to "confidence" follow them.
+    """
+    columns = [*keys, "runs", "observed_runs", "mean", "lower", "upper", "confidence"]
     return pl.DataFrame(
         data=rows,
-        schema_overrides={
-            "station": pl.String,
-            "mean": pl.Float64,
-            "lower": pl.Float64,
-            "upper": pl.Float64,
-        },
+        schema={column: INTERVAL_SCHEMA[column] for column in columns},
     )
 
 
@@ -608,7 +623,7 @@ class Experiment:
         else:
             names = list(self.runs[0].capacities) if station is None else [station]
         return interval_frame(
-            [
+            rows=[
                 {
                     "station": name,
                     "metric": metric,
@@ -617,5 +632,6 @@ class Experiment:
                     "confidence": level,
                 }
                 for name in names
-            ]
+            ],
+            keys=["station", "metric"],
         )

@@ -503,6 +503,30 @@ def test_replications_report_missing_estimates():
     assert interval["mean"] is interval["lower"] is interval["upper"] is None
 
 
+def test_station_intervals_without_stations_keep_their_columns():
+    model = Model()
+    source = model.source(
+        name="Customers",
+        interarrival=1,
+    )
+    model.route([source, model.exit])
+    intervals = model.experiment(
+        duration=5,
+        replications=2,
+    ).intervals("mean_wait")
+    assert intervals.height == 0
+    assert intervals.schema == {
+        "station": pl.String,
+        "metric": pl.String,
+        "runs": pl.Int64,
+        "observed_runs": pl.Int64,
+        "mean": pl.Float64,
+        "lower": pl.Float64,
+        "upper": pl.Float64,
+        "confidence": pl.Float64,
+    }
+
+
 def test_viewer_escapes_model_text_and_plots_are_not_notebook_objects():
     model = Model()
     source = model.source(
