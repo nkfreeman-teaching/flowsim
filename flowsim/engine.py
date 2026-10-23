@@ -55,7 +55,7 @@ class _Run:
         self.active_customers = 0
         self.finished = self.scheduler.event()
         self.streams: dict[str, tuple[np.random.Generator, np.random.Generator]] = {}
-        names = sorted(model._nodes)
+        names = list(model._nodes)
         keys: dict[str, int] = {}
         owners: dict[int, str] = {}
         for name in names:

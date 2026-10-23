@@ -250,8 +250,22 @@ def test_node_names_with_one_stream_key_raise():
         service_time=1,
     )
     model.route([arrivals, service, model.exit])
-    with pytest.raises(ValueError, match="'buckeroo' and 'plumless' share"):
+    with pytest.raises(ValueError, match="'plumless' and 'buckeroo' share"):
         model.run(duration=5)
+
+
+def test_stations_are_listed_in_definition_order():
+    # The model defines Triage, Routine, Specialist, which is not alphabetical.
+    result = branching_service().run(
+        duration=60,
+        seed=123,
+    )
+    order = ["Triage", "Routine", "Specialist"]
+    assert result.stations.get_column("station").to_list() == order
+    assert result.states.get_column("station").unique(
+        maintain_order=True
+    ).to_list() == (order)
+    assert list(result.capacities) == order
 
 
 def test_branch_routes_each_customer_to_one_service():
