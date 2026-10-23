@@ -14,10 +14,13 @@ check = { depends-on = ["test", "lint", "format-check", "notebook-check"] }
 demo = "python -m examples.run_examples"
 notebook = "marimo edit examples/lesson.py"
 notebook-export = "marimo export html examples/lesson.py -o output/lesson.html"
+# Fail when Marimo replaced an output with its size warning, which pyproject.toml's
+# output_max_bytes prevents for the lesson viewers.
+lesson-check = { cmd = "python -c \"import pathlib, sys; html = pathlib.Path('output/lesson.html').read_text(encoding='utf-8'); sys.exit('output/lesson.html has a Marimo size warning.' if 'too large for marimo' in html else 0)\"", depends-on = ["notebook-export"] }
 exercise = "python -m examples.service_day"
 extensions = "python -m examples.extensions"
 # Run every example end to end, including the notebook, after behavioral changes.
-examples = { depends-on = ["demo", "exercise", "extensions", "notebook-export"] }
+examples = { depends-on = ["demo", "exercise", "extensions", "lesson-check"] }
 
 [dependencies]
 python = ">=3.12,<3.14"

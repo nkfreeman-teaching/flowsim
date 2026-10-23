@@ -29,7 +29,7 @@ The repository defines these tasks:
 | `pixi run extensions` | Runs peak demand with a lunch break, a buffered production line, a machine with repairs, and a combined line from `examples/extensions.py`, writing them under `output/extensions/`. |
 | `pixi run notebook` | Opens the Marimo lesson, which adds controls for staffing, shift and failure-clock rules, and customer timelines. |
 | `pixi run notebook-export` | Executes the lesson and saves `output/lesson.html`. |
-| `pixi run examples` | Runs the four tasks above that execute examples. |
+| `pixi run examples` | Runs the four tasks above that execute examples, and fails if Marimo replaced a lesson output with a size warning. |
 | `pixi run check` | Runs the tests, lint, format check, and notebook check. |
 | `pixi run format` | Formats the code with ruff. |
 

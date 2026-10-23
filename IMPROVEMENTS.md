@@ -38,7 +38,7 @@ outputs.
 
 | # | Change | Where | Found by | Outputs | Status |
 |---|---|---|---|---|---|
-| 1.1 | Lesson viewers replaced by Marimo size warnings | `pyproject.toml`, `pixi.toml` | Codex | Lesson display only | open |
+| 1.1 | Lesson viewers replaced by Marimo size warnings | `pyproject.toml`, `pixi.toml` | Codex | Lesson display only | done |
 | 1.2 | Decimal times leave a tiny remainder that pauses finished work | `flowsim/station.py:94-108` | Opus | Yes, rare runs | open |
 | 1.3 | A non-advancing failure and repair cycle hangs the run | `flowsim/station.py:110-151` | Codex | Error instead of hang | open |
 | 1.4 | Make "shift changes first" an explicit priority and fix the tie-order wording | `scheduler.py`, `engine.py:18-23`, `station.py:173-180`, README, AGENTS.md | Opus, Sonnet | None expected | open |

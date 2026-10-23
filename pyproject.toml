@@ -44,3 +44,8 @@ extend-exclude = ["examples/__marimo__"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.marimo.runtime]
+# Each lesson viewer embeds plotly.js, and Marimo's iframe encoding roughly
+# doubles it to about 12 MB, which exceeds Marimo's 8 MB default.
+output_max_bytes = 30_000_000
