@@ -1,5 +1,7 @@
 """Independent arrival, shift, buffer, and reliability oracles."""
 
+import json
+
 import numpy as np
 import polars as pl
 import pytest
@@ -168,6 +170,30 @@ def test_staffing_initially_zero_waits_until_a_server_is_scheduled():
     assert metrics["mean_scheduled_servers"] == 0
     assert metrics["staffed_utilization"] is None
     assert metrics["mean_queue"] == 2
+
+
+def test_staffing_levels_are_integers_and_rates_are_floats(tmp_path):
+    model = Model()
+    source = model.source(
+        name="Customers",
+        rates=[(0, 2), (5, 1)],
+    )
+    station = model.station(
+        name="Service",
+        capacity=2,
+        service_time=1,
+        staffing=[(0, 2), (5, 1)],
+        shift_end="finish",
+    )
+    model.route([source, station, model.exit])
+    model.run(duration=10).export(tmp_path)
+    definitions = json.loads((tmp_path / "metadata.json").read_text())["definitions"]
+    staffing = definitions["Service"]["staffing"]
+    rates = definitions["Customers"]["arrival_rates"]
+    assert staffing == [[0.0, 2], [5.0, 1]]
+    assert all(type(level) is int for _, level in staffing)
+    assert rates == [[0.0, 2.0], [5.0, 1.0]]
+    assert all(type(rate) is float for _, rate in rates)
 
 
 def test_no_future_staffing_raises_instead_of_an_infinite_drain():

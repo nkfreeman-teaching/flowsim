@@ -42,7 +42,7 @@ def validate_schedule(
         )
         if maximum is not None and value > maximum:
             raise ValueError(f"{label} cannot exceed installed capacity {maximum}.")
-        result.append((time, float(value)))
+        result.append((time, value))
         prior = time
     return tuple(result)
 

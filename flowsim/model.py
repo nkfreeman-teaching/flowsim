@@ -68,7 +68,7 @@ class Node:
     first_arrival: float | None = None
     limit: int | None = None
     arrival_rates: tuple[tuple[float, float], ...] | None = None
-    staffing: tuple[tuple[float, float], ...] | None = None
+    staffing: tuple[tuple[float, int], ...] | None = None
     shift_end: str | None = None
     buffer: int | None = None
     external_overflow: str | None = None

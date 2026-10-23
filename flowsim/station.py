@@ -174,7 +174,7 @@ class _Station:
         self.run = run
         self.node = node
         self.scheduled_level = (
-            node.capacity if node.staffing is None else int(node.staffing[0][1])
+            node.capacity if node.staffing is None else node.staffing[0][1]
         )
         self.waiting: deque[_Ticket] = deque()
         self.drain_check_pending = False
@@ -191,10 +191,7 @@ class _Station:
         if node.staffing is not None:
             # Shift changes precede completions and arrivals at equal times.
             events = [
-                (
-                    run.scheduler.timeout(time, priority=SHIFT_PRIORITY),
-                    int(level),
-                )
+                (run.scheduler.timeout(time, priority=SHIFT_PRIORITY), level)
                 for time, level in node.staffing[1:]
             ]
             run.scheduler.process(self.shifts(events))
