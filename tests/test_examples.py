@@ -1,11 +1,19 @@
 """Check that the teaching examples run and keep their stated rules."""
 
+import math
+
 import numpy as np
 import polars as pl
 import pytest
 
 from examples import extensions, models
-from examples.service_day import staffing_exercise
+from examples.service_day import (
+    ON_TIME_SHARE,
+    OVERTIME_LIMIT,
+    STAFFING,
+    WAIT_TARGET,
+    staffing_exercise,
+)
 
 
 @pytest.mark.parametrize(
@@ -31,13 +39,22 @@ def test_example_models_run(build):
 
 def test_worked_exercise_preserves_customer_accounting_and_target_rule():
     comparison, decision = staffing_exercise(replications=3)
-    assert decision.height == 3
+    # Each row's server count is the Service capacity of the model it names.
+    assert decision.select(
+        "servers",
+        "scenario",
+    ).rows() == list(STAFFING.items())
+    # Meeting the share of 3 days takes ceil(0.9 * 3) = 3 on-time days.
+    required = math.ceil(ON_TIME_SHARE * 3)
+    assert required == 3
     for row in decision.to_dicts():
-        runs = comparison.experiments[row["scenario"]].summary
-        qualifying = runs.filter(pl.col("overtime") <= 30).height
+        experiment = comparison.experiments[row["scenario"]]
+        assert experiment.runs[0].capacities["Service"] == row["servers"]
+        runs = experiment.summary
+        qualifying = runs.filter(pl.col("overtime") <= OVERTIME_LIMIT).height
         assert row["days_finished_on_time"] == qualifying
         assert row["meets_targets"] == (
-            row["mean_wait_minutes"] <= 5 and qualifying >= 3
+            row["mean_wait_minutes"] <= WAIT_TARGET and qualifying >= required
         )
         assert runs.get_column("remaining").to_list() == [0, 0, 0]
         assert np.all(

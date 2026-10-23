@@ -4,6 +4,14 @@ from pathlib import Path
 
 from flowsim import Model
 
+# Operating durations of the extension examples, used by main() and the lesson.
+DURATIONS = {
+    "Peak service": 480,
+    "Buffered line": 40,
+    "Repairing machine": 240,
+    "Combined line": 180,
+}
+
 
 def peak_service(shift_end: str = "finish") -> Model:
     model = Model()
@@ -99,18 +107,19 @@ def combined_line(
 
 
 def main():
-    examples = [
-        ("peak-service", peak_service(), 480),
-        ("buffered-line", buffered_line(), 40),
-        ("repairing-machine", repairing_machine(), 240),
-        ("combined-line", combined_line(), 180),
-    ]
-    for name, model, duration in examples:
+    examples = {
+        "Peak service": peak_service(),
+        "Buffered line": buffered_line(),
+        "Repairing machine": repairing_machine(),
+        "Combined line": combined_line(),
+    }
+    for title, model in examples.items():
         result = model.run(
-            duration=duration,
+            duration=DURATIONS[title],
             seed=42,
             drain=True,
         )
+        name = title.lower().replace(" ", "-")
         output = Path("output/extensions") / name
         result.export(output)
         result.viewer(output / "viewer.html")

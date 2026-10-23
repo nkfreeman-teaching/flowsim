@@ -21,14 +21,15 @@ DAYS = 20  # simulated days per staffing level
 WAIT_TARGET = 5  # maximum mean total wait, in minutes
 OVERTIME_LIMIT = 30  # minutes after closing to finish every admitted customer
 ON_TIME_SHARE = 0.9  # share of days that must finish within the limit
+# Staffing levels compared in the exercise, keyed by Service server count.
+STAFFING = {1: "One server", 2: "Two servers", 3: "Three servers"}
 
 
 def staffing_exercise(replications: int = DAYS, seed: int = 42):
     """Compare the lowest staffing level meeting two finite-experiment targets."""
     scenarios = {
-        "One server": service_network(service_capacity=1),
-        "Two servers": service_network(service_capacity=2),
-        "Three servers": service_network(service_capacity=3),
+        name: service_network(service_capacity=servers)
+        for servers, name in STAFFING.items()
     }
     comparison = compare(
         scenarios=scenarios,
@@ -40,13 +41,14 @@ def staffing_exercise(replications: int = DAYS, seed: int = 42):
     # Both targets describe this finite experiment. The 90% requirement is an
     # observed day count, not a confidence bound on a population probability.
     rows = []
-    intervals = comparison.intervals().to_dicts()
-    for servers, row in enumerate(intervals, start=1):
-        runs = comparison.experiments[row["scenario"]].summary
+    intervals = {row["scenario"]: row for row in comparison.intervals().to_dicts()}
+    for servers, name in STAFFING.items():
+        row = intervals[name]
+        runs = comparison.experiments[name].summary
         on_time = runs.filter(pl.col("overtime") <= OVERTIME_LIMIT).height
         rows.append(
             {
-                "scenario": row["scenario"],
+                "scenario": name,
                 "servers": servers,
                 "mean_wait_minutes": row["mean"],
                 "wait_lower": row["lower"],

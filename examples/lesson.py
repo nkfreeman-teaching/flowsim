@@ -7,7 +7,13 @@ app = marimo.App(width="full")
 @app.cell
 def _():
     import marimo as mo
-    from extensions import buffered_line, combined_line, peak_service, repairing_machine
+    from extensions import (
+        DURATIONS,
+        buffered_line,
+        combined_line,
+        peak_service,
+        repairing_machine,
+    )
     from models import branching_service, deterministic_queue, service_network
     from service_day import (
         DAYS,
@@ -19,6 +25,7 @@ def _():
 
     return (
         DAYS,
+        DURATIONS,
         ON_TIME_SHARE,
         OVERTIME_LIMIT,
         WAIT_TARGET,
@@ -262,9 +269,9 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _(DURATIONS, mo):
     extension_choice = mo.ui.dropdown(
-        options=["Peak service", "Buffered line", "Repairing machine", "Combined line"],
+        options=list(DURATIONS),
         value="Combined line",
         label="Example system",
     )
@@ -297,6 +304,7 @@ def _(extension_choice, mo):
 
 @app.cell
 def _(
+    DURATIONS,
     buffered_line,
     combined_line,
     extension_choice,
@@ -310,22 +318,16 @@ def _(
         "available" if failure_choice.value == "Elapsed available time" else "busy"
     )
     _models = {
-        "Peak service": (lambda: peak_service(shift_end=_shift_policy), 480),
-        "Buffered line": (buffered_line, 40),
-        "Repairing machine": (
-            lambda: repairing_machine(failure_clock=_failure_clock),
-            240,
-        ),
-        "Combined line": (
-            lambda: combined_line(
-                shift_end=_shift_policy,
-                failure_clock=_failure_clock,
-            ),
-            180,
+        "Peak service": lambda: peak_service(shift_end=_shift_policy),
+        "Buffered line": buffered_line,
+        "Repairing machine": lambda: repairing_machine(failure_clock=_failure_clock),
+        "Combined line": lambda: combined_line(
+            shift_end=_shift_policy,
+            failure_clock=_failure_clock,
         ),
     }
-    _factory, extension_duration = _models[extension_choice.value]
-    extension_model = _factory()
+    extension_model = _models[extension_choice.value]()
+    extension_duration = DURATIONS[extension_choice.value]
     return extension_duration, extension_model
 
 
