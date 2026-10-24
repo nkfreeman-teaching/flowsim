@@ -16,3 +16,6 @@ logs/
 .vscode/
 .idea/
 .claude/settings.local.json
+
+# Review-loop run folders (briefs, frozen renders, reviewer reports).
+review-loop/
