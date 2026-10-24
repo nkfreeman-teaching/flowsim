@@ -8,8 +8,8 @@ and student code uses ordinary Python calls and NumPy duration samplers. Results
 are Polars tables, Plotly figures, CSV exports, and an offline HTML viewer. A
 Marimo lesson in `examples/lesson.py` is an optional classroom client, and the
 package itself has no Marimo dependency. FlowSim also models supply chains of
-stock points that fill orders from inventory and reorder each period (see
-Inventory and ordering).
+stock points that fill orders from inventory and reorder each period, including
+a top stage that produces its orders at stations (see Inventory and ordering).
 
 ## Getting started
 
@@ -135,7 +135,7 @@ unknown outcome with zero.
 
 | File | Contents |
 | --- | --- |
-| `customers.csv` | Each customer's source, type, system arrival, admission, exit or abandonment, flow time, observed total wait and blocking, final status, and current station. |
+| `customers.csv` | Each customer's source, type, production quantity, system arrival, admission, exit or abandonment, flow time, observed total wait and blocking, final status, and current station. |
 | `visits.csv` | Each station visit's customer type, arrival, service start, processing completion, departure or abandonment, server identity, waiting, blocking, and sampled service requirement. |
 | `states.csv` | Station queue and server counts after each time with a state change, plus closing and the end of service. |
 | `stations.csv` | Station counts, wait summaries, time-weighted queue lengths, and utilization. |
@@ -507,9 +507,9 @@ that fill orders from stock and reorder from the next stage up the chain.
 `model.demand` draws consumer demand as a quantity per review period,
 `model.stock_point` defines a stage, and `model.supply` lists the chain from
 demand to the top stage, which orders from a supplier with unlimited stock that
-ships in the same period. A model holds either a service network or a supply
-chain, since stock points cannot yet release work to stations, and a supply
-chain run does not accept `drain=True`.
+ships in the same period unless it produces at stations (see Production at
+stations). A supply chain has no arrival sources, and a supply chain run does
+not accept `drain=True`.
 
 ```python
 from flowsim import Model, moving_average, order_up_to
@@ -551,7 +551,8 @@ supply_run.viewer("output/supply-chain.html")
 Every stock-point argument is required, since each is a behavioral choice.
 `initial` is the stock on hand at time zero, with nothing on order. `lead_time`
 is the delay from the supplier's shipment to this stage's receipt, either a
-constant that is a whole number of review periods or a sampling function.
+constant that is a whole number of review periods or a sampling function, or
+`None` for a top stage that produces at stations.
 `shortage` is `"backorder"` (unfilled orders wait and ship first when stock
 arrives) or `"lost"` (unfilled orders disappear, and the downstream stage stops
 expecting them). `forecast_from` is `"orders"` (each stage forecasts from the
@@ -604,6 +605,112 @@ equation 14.8), i.e., 2.12 for p = 5 and L = 2, and the test suite checks the
 simulator against this value. However, the closed form allows negative orders
 and FlowSim never orders less than zero, so it applies only when demand rarely
 falls far enough to call for a negative order.
+
+### Production at stations
+
+A top stage with `lead_time=None` makes its orders at stations instead of
+receiving them from a supplier after a stated delay, so the stations' capacity,
+failures, and shifts set its lead time. Only the top stage can produce, since
+every other stage orders from the stage above it. Its route leaves the stock
+point and returns to it, and every station in the model must lie on that route,
+because a supply chain has no arrival sources.
+
+```python
+from flowsim import Model, moving_average, order_up_to
+
+plant = Model(time_unit="weeks")
+shoppers = plant.demand(
+    name="Consumers",
+    per_period=lambda rng: max(0.0, rng.normal(100, 20)),
+)
+store = plant.stock_point(
+    name="Retailer",
+    initial=200,
+    lead_time=2,
+    shortage="backorder",
+    policy=order_up_to(
+        forecast=moving_average(window=5),
+        safety_factor=1,
+    ),
+    forecast_from="orders",
+)
+factory = plant.stock_point(
+    name="Factory",
+    initial=200,
+    lead_time=None,
+    batch_size=25,
+    shortage="backorder",
+    policy=order_up_to(
+        forecast=moving_average(window=5),
+        safety_factor=1,
+        cover=2,
+    ),
+    forecast_from="orders",
+)
+brewhouse = plant.station(
+    name="Brewhouse",
+    capacity=1,
+    service_time=1 / 150,
+)
+plant.route([factory, brewhouse, factory])
+plant.supply(
+    [shoppers, store, factory],
+    period=1,
+)
+plant_run = plant.run(
+    duration=104,
+    seed=7,
+    warmup=20,
+)
+print(plant_run.stock_points)
+print(
+    plant_run.customers.select(
+        "customer_id",
+        "quantity",
+        "arrival_time",
+        "exit_time",
+    )
+)
+print(plant_run.stations)
+```
+
+Each review's order splits into jobs of `batch_size` units, and the last job
+holds the remainder (e.g., an order of 60 with a batch size of 25 makes jobs of
+25, 25, and 10). A production station's `service_time` is the time per unit, so
+a job's service time is its quantity times one draw, and the brewhouse above
+makes 150 cases per week. A finished job enters stock at the first review at or
+after it leaves the last station, and a job that finishes exactly at a review
+counts at that review, since completions run before reviews at equal times.
+Jobs may finish out of order at a station with several servers, and their
+receipts follow the order in which they finish.
+
+The batch size sets how units move along a line of several stations. A batch at
+least as large as every order moves each order through one station at a time,
+while a batch of 1 lets a downstream station start on the first unit while the
+upstream station works on the rest, which shortens the lead time. For example,
+an order of 4 units on two stations that each take 1/32 week per unit leaves
+after 8/32 week as one job, while single units leave at 2/32, 3/32, 4/32, and
+5/32 week.
+
+A stage that produces requires `cover=` in `order_up_to`, because its lead time
+comes from the stations rather than from an argument. FlowSim does not estimate
+the cover from observed lead times, since that would link targets to queues
+(i.e., larger targets raise orders, which lengthen queues and then raise
+targets again). Jobs carry no customer type, so production stations cannot set
+service times, priorities, or routes by type. They also cannot set patience or
+reject outside arrivals, since an abandoned or rejected job would remove units
+from an order. A finite first buffer with `external_overflow="wait"` holds
+released jobs outside the line (i.e., a release queue), and `outside_wait`
+records how long each job waited there.
+
+The customers table holds one row per job, with its `quantity`, its release
+time as `arrival_time`, and its finish time as `exit_time`, so `flow_time` is
+the production lead time without the wait for the next review. `quantity` is
+empty for customers from sources. The station, visit, activity, and summary
+tables describe the production stations as they describe a service network,
+and `inventory` reports what each review receives. The factory receives no
+shipments, so `shipments` lists only shipments between stages, and the supply
+viewer shows the stock points without the stations.
 
 ## Measurement rules
 
@@ -871,8 +978,7 @@ queue sits on the access road or in gate lanes blocked by a full yard.
 
 Both models simplify their settings. Each truckload remains one job from gate
 to exit, since FlowSim cannot split a load into pallets or combine pallets into
-an outbound trailer, and every blank follows the same routing, since customers
-carry no product type.
+an outbound trailer, and every blank follows the same routing.
 
 ## Supply chain example
 
@@ -887,20 +993,40 @@ with a ten-week moving average. `pixi run supply-chain` writes the comparison
 report, the per-replication stock-point table, and the first replication's
 records and viewer under `output/supply_chain/`.
 
-In the saved study, forecasting from orders gives a retailer bullwhip ratio of
-2.25 (95% CI 2.18 to 2.32), above the closed-form 2.12 because safety stock
-estimated from five weeks of demand also varies. The ratios compound up the
-chain, so factory orders vary 37.6 times as much as consumer demand. Sharing
+`capacity_study` replaces the factory's two-week lead time with a brewhouse
+that makes 120, 150, or 200 cases per week in jobs of 25 cases, with a target
+that covers two weeks of forecast demand, and a fifth scenario brews 150 cases
+per week with three weeks of cover. `pixi run supply-chain` writes its report
+under `output/supply_chain/capacity/`.
+
+In the saved bullwhip study, forecasting from orders gives a retailer bullwhip
+ratio of 2.25 (95% CI 2.18 to 2.32), above the closed-form 2.12 because safety
+stock estimated from five weeks of demand also varies. The ratios compound up
+the chain, so factory orders vary 37.6 times as much as consumer demand. Sharing
 consumer demand leaves the retailer unchanged, since the retailer already sees
 that demand, and lowers the factory's own ratio by 0.89 (95% CI 0.77 to 1.00),
 which cuts factory order variance to 9.7 times consumer demand. A ten-week
 average damps every stage (factory order variance 8.6 times consumer demand) and
 raises the retailer's fill rate from 87.0% to 91.4%. Sharing instead lowers the
 retailer's fill rate to 84.4%, since the wholesaler then plans its stock from
-consumer demand while still filling the retailer's more variable orders, and
-its own fill rate falls from 83.4% to 77.9%. Thus, sharing demand removes most
-of the amplification between stages, but the stages that receive the shared
-data still need stock sized to the orders they actually fill.
+consumer demand while still filling the retailer's more variable orders, and its
+own fill rate falls from 83.4% to 77.9%. Thus, sharing demand removes most of
+the amplification between stages, but the stages that receive the shared data
+still need stock sized to the orders they actually fill.
+
+In the saved capacity study, the factory fills 83.8% of its incoming orders in
+the same week with a two-week lead time (95% CI 82.4% to 85.3%). Brewing 120
+cases per week lowers that fill rate to 76.5%, since a job then takes 2.29 weeks
+on average from its order to its finish, and brewing 150 or 200 cases per week
+raises it to 88.3% and 94.2% with mean job times of 1.49 and 0.92 weeks. The
+factory's bullwhip ratio is 2.32 in all four scenarios, because the inventory
+position counts units on order, so receipts never change it, and the factory
+places the same orders however soon they arrive. Three weeks of cover at 150
+cases per week raises the fill rate to 97.1% but also raises the factory's
+bullwhip ratio to 2.76 (95% CI 2.61 to 2.91), and the mean job time rises from
+1.49 to 1.71 weeks with those more variable orders. Thus, capacity above mean
+demand (120 cases is 20% above it) is not enough when orders arrive amplified,
+and a longer cover buys service with more variable orders.
 
 Each stage starts with 200 cases on hand and nothing on order, so the first
 weeks carry a startup surge of orders that the warm-up excludes. The orders
@@ -935,11 +1061,12 @@ first-served service unless a station ranks customer types, abandonment after a
 patience time, identical servers within each station, scheduled demand and
 staffing, finite buffers, blocking after service, and independent failures with
 resumable work. Every station has its own server pool. Preemption, balking
-(i.e., refusing to join a long line), batches, workers shared across stations,
-shared repair crews, and rework loops are not implemented.
-Supply chains are linear, review every stage on one period, order with an
-order-up-to policy and a moving-average forecast, and cannot share a model with
-a service network, so a factory's lead time stands in for its production.
+(i.e., refusing to join a long line), batch service, workers shared across
+stations, shared repair crews, and rework loops are not implemented.
+Supply chains are linear, review every stage on one period, and order with an
+order-up-to policy and a moving-average forecast. Only the top stage can
+produce at stations, its jobs cannot share those stations with customers from
+sources, and its cover is stated rather than estimated.
 
 Runs keep every customer, visit, and state record in memory, which suits
 classroom-scale examples. There is no streaming or aggregate-only mode, and the

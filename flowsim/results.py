@@ -23,6 +23,7 @@ CUSTOMER_SCHEMA = {
     "customer_id": pl.Int64,
     "source": pl.String,
     "customer_type": pl.String,
+    "quantity": pl.Float64,
     "arrival_time": pl.Float64,
     "exit_time": pl.Float64,
     "abandon_time": pl.Float64,
@@ -196,6 +197,8 @@ class _Customer:
     source: str
     # None for a customer from a source without types.
     customer_type: str | None = None
+    # Units in a production job, or None for a customer from a source.
+    quantity: float | None = None
     arrival_time: float
     exit_time: float | None = None
     abandon_time: float | None = None

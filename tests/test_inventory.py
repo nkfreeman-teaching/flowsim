@@ -636,7 +636,7 @@ def test_supply_chains_stay_separate_from_service_networks():
         [demand, store],
         period=1,
     )
-    assert "either a service network or a supply chain" in build_error(
+    assert "has no arrival sources" in build_error(
         lambda: model.source(
             name="Customers",
             interarrival=1,
@@ -672,7 +672,7 @@ def test_supply_chains_stay_separate_from_service_networks():
         model=network,
         name="Store",
     )
-    assert "either a service network or a supply chain" in build_error(
+    assert "has no arrival sources" in build_error(
         lambda: network.supply([network_demand, network_store], period=1)
     )
 

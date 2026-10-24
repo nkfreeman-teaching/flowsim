@@ -85,7 +85,8 @@ class _Stock:
     """A stock point's running state during one run.
 
     The pipeline holds shipments on the way as (receipt period, record) pairs in
-    sending order, so receipts come off its front.
+    sending order, so receipts come off its front. At a stock point that
+    produces, produced holds the units of jobs finished since its last review.
     """
 
     node: Node
@@ -94,6 +95,7 @@ class _Stock:
     on_hand: float
     backorders: float = 0.0
     on_order: float = 0.0
+    produced: float = 0.0
     history: list[float] = field(default_factory=list)
     pipeline: deque[tuple[int, _Shipment]] = field(default_factory=deque)
 
@@ -201,6 +203,7 @@ class _Run:
         # The chain runs from the retailer, nearest demand, up to the top stage.
         # A constant lead time is a whole number of periods, which Model.supply
         # checks, so rounding removes floating-point remainders from its cover.
+        # A sampled lead time and production both require an explicit cover.
         self.stocks = [
             _Stock(
                 node=node,
@@ -361,7 +364,8 @@ class _Run:
             while True:
                 yield ticket.finished
                 destination = self.next_node(node.name, customer)
-                if destination.kind == "exit":
+                # A production job leaves the network at its stock point.
+                if destination.kind in {"exit", "stock_point"}:
                     station.release(ticket)
                     break
                 downstream = self.stations[destination.name]
@@ -375,6 +379,9 @@ class _Run:
         customer.flow_time = self.scheduler.now - customer.arrival_time
         customer.status = Status.COMPLETED
         customer.station = None
+        if customer.quantity is not None:
+            # Only the top stage produces, and its next review receives these.
+            self.stocks[-1].produced += customer.quantity
         self.complete_active()
 
     def complete_active(self) -> None:
@@ -411,7 +418,10 @@ class _Run:
         incoming = consumers
         for index, stock in enumerate(self.stocks):
             downstream = self.stocks[index - 1] if index else None
-            received = 0.0
+            # Jobs that finished at this review's time count, since completions
+            # run before reviews at equal times.
+            received = stock.produced
+            stock.produced = 0.0
             while stock.pipeline and stock.pipeline[0][0] <= period:
                 _, shipment = stock.pipeline.popleft()
                 shipment.arrival_time = time
@@ -465,13 +475,36 @@ class _Run:
                 )
             )
             incoming = order
-        if incoming > 0:
+        top = self.stocks[-1]
+        if incoming > 0 and top.node.lead_time is None:
+            self.release(top.node, incoming)
+        elif incoming > 0:
             self.ship(
                 sender=SUPPLIER,
-                receiver=self.stocks[-1],
+                receiver=top,
                 quantity=incoming,
                 period=period,
             )
+
+    def release(self, node: Node, quantity: float) -> None:
+        """Split a production order into jobs that start at the stock point's route.
+
+        Each job holds batch_size units except the last, which holds the rest.
+        """
+        size = node.batch_size
+        # The tolerance keeps an order of exactly k batches, computed in
+        # floating point, from adding a k + 1st job of almost nothing.
+        jobs = max(1, math.ceil(quantity / size - 1e-9))
+        for index in range(jobs):
+            customer = _Customer(
+                customer_id=len(self.customers) + 1,
+                source=node.name,
+                quantity=size if index < jobs - 1 else quantity - index * size,
+                arrival_time=float(self.scheduler.now),
+            )
+            self.customers.append(customer)
+            self.active_customers += 1
+            self.scheduler.process(self.customer(customer, node))
 
     def ship(self, sender: str, receiver: _Stock, quantity: float, period: int) -> None:
         """Send a shipment that the receiver adds to stock at a later review.
@@ -519,10 +552,13 @@ class _Run:
                 stock.node.name: {
                     "initial": stock.node.initial,
                     "lead_time": (
-                        "sampled"
+                        "production"
+                        if stock.node.lead_time is None
+                        else "sampled"
                         if callable(stock.node.lead_time)
                         else stock.node.lead_time
                     ),
+                    "batch_size": stock.node.batch_size,
                     "cover": stock.cover,
                     "shortage": stock.node.shortage,
                     "forecast_from": stock.node.forecast_from,

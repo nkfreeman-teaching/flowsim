@@ -307,18 +307,22 @@ class _Station:
             customer.admission_time = now
             customer.outside_wait = now - customer.arrival_time
             customer.total_wait += customer.outside_wait
+        service_time = self.draw(
+            distribution=self.node.service_time,
+            label="Service time",
+            customer=customer,
+            rng=self.run.streams[self.node.name].durations,
+        )
+        if customer.quantity is not None:
+            # A production station's service time is per unit, drawn once per job.
+            service_time *= customer.quantity
         ticket.visit = _Visit(
             customer_id=customer.customer_id,
             source=customer.source,
             customer_type=customer.customer_type,
             station=self.node.name,
             arrival_time=now,
-            service_time=self.draw(
-                distribution=self.node.service_time,
-                label="Service time",
-                customer=customer,
-                rng=self.run.streams[self.node.name].durations,
-            ),
+            service_time=service_time,
         )
         self.run.visits.append(ticket.visit)
         customer.station = self.node.name

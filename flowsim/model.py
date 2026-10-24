@@ -59,14 +59,18 @@ class Node:
     failure_clock: str | None = None
     per_period: Duration | None = None
     initial: float | None = None
+    # None at a stock point that produces at stations, whose jobs hold at most
+    # batch_size units each.
     lead_time: Duration | None = None
+    batch_size: float | None = None
     shortage: str | None = None
     policy: OrderUpTo | None = None
     forecast_from: str | None = None
 
 
 # Node kinds that customers visit along routes. Demand and stock points belong
-# to a supply chain instead, which has no routes.
+# to a supply chain instead, although a stock point that produces releases jobs
+# to stations and receives them back.
 NETWORK_KINDS = {"source", "station", "exit"}
 
 # One routing rule's destinations and probabilities, in the order given.
@@ -215,15 +219,15 @@ class Model:
             raise ValueError("Each node needs a nonempty name.")
         if node.name in self._nodes:
             raise ValueError(f"The name {node.name!r} already exists in this model.")
-        if node.kind in {"source", "station"} and self._supply is not None:
+        if node.kind == "source" and self._supply is not None:
             raise ValueError(_ONE_KIND)
         self._nodes[node.name] = node
         if node.kind in NETWORK_KINDS:
             self._graph.add_node(node.name)
         return node
 
-    def _has_network(self) -> bool:
-        return any(node.kind in {"source", "station"} for node in self._nodes.values())
+    def _has_sources(self) -> bool:
+        return any(node.kind == "source" for node in self._nodes.values())
 
     def _owned(self, node: Node) -> None:
         if not isinstance(node, Node) or self._nodes.get(node.name) is not node:
@@ -416,20 +420,44 @@ class Model:
         name: str,
         *,
         initial: Real,
-        lead_time: Duration,
+        lead_time: Duration | None,
         shortage: str,
         policy: OrderUpTo,
         forecast_from: str,
+        batch_size: Real | None = None,
     ) -> Node:
         """Create a stock point that fills orders from stock and reorders each period.
 
         lead_time is the delay from its supplier's shipment to its own receipt.
         Every argument is a behavioral choice, so none has a default.
+
+        lead_time=None makes the top stage produce at stations instead. Its
+        route leaves it and returns to it, each order splits into jobs of
+        batch_size units (the last one smaller), and a finished job enters
+        stock at the first review at or after it leaves the last station.
         """
         stock = number(initial, "Initial stock")
         if not isinstance(policy, OrderUpTo):
             raise ValueError("policy must come from flowsim.order_up_to.")
-        if callable(lead_time):
+        size = None
+        if lead_time is None:
+            if policy.cover is None:
+                raise ValueError(
+                    "A stock point that produces (lead_time=None) needs an "
+                    "explicit cover in order_up_to, since its stations set its "
+                    "lead time."
+                )
+            size = number(
+                value=batch_size,
+                label="Batch size",
+                positive=True,
+            )
+        elif batch_size is not None:
+            raise ValueError(
+                "batch_size requires lead_time=None, i.e., a stock point that "
+                "produces at stations."
+            )
+        elif callable(lead_time):
             if policy.cover is None:
                 raise ValueError(
                     "A sampled lead time needs an explicit cover in order_up_to, "
@@ -456,6 +484,7 @@ class Model:
                 kind="stock_point",
                 initial=stock,
                 lead_time=lead_time,
+                batch_size=size,
                 shortage=shortage,
                 policy=policy,
                 forecast_from=forecast_from,
@@ -466,11 +495,12 @@ class Model:
         """Link demand to stock points, each ordering from the next in the list.
 
         The last stock point orders from a supplier with unlimited stock that
-        ships in the same period. Every stage reviews once per period.
+        ships in the same period, unless it produces at stations. Every stage
+        reviews once per period.
         """
         if self._supply is not None:
             raise ValueError("This model already has a supply chain.")
-        if self._has_network():
+        if self._has_sources():
             raise ValueError(_ONE_KIND)
         if len(chain) < 2:
             raise ValueError(
@@ -494,8 +524,13 @@ class Model:
             label="Review period",
             positive=True,
         )
+        if any(node.lead_time is None for node in stock_points[:-1]):
+            raise ValueError(
+                "Only the top stage can produce (lead_time=None), since every "
+                "other stage orders from the stage above it."
+            )
         for node in stock_points:
-            if callable(node.lead_time):
+            if node.lead_time is None or callable(node.lead_time):
                 continue
             periods = round(node.lead_time / length)
             if periods < 1 or not math.isclose(
@@ -532,7 +567,9 @@ class Model:
         edges = list(zip(nodes[:-1], nodes[1:]))
         for origin, destination in edges:
             self._check_edge(origin, destination)
-        if len({node.name for node in nodes}) != len(nodes):
+        # A production route leaves its stock point and returns to it.
+        loop = nodes[0] is nodes[-1] and nodes[0].kind == "stock_point"
+        if len({node.name for node in nodes}) != len(nodes) - loop:
             self._cycle_error(keys[0])
         rules = []
         for origin, destination in edges:
@@ -557,6 +594,14 @@ class Model:
             raise ValueError("The exit cannot have an outgoing route.")
         if destination.kind == "source":
             raise ValueError("A source cannot receive routed customers.")
+        if "demand" in {origin.kind, destination.kind}:
+            raise ValueError("Demand belongs to a supply chain and has no routes.")
+        if origin.kind == "stock_point" and destination.kind != "station":
+            raise ValueError("A stock point releases production jobs to a station.")
+        if destination.kind == "stock_point" and origin.kind != "station":
+            raise ValueError(
+                "Only a station can return finished jobs to a stock point."
+            )
 
     def branch(
         self,
@@ -652,19 +697,29 @@ class Model:
         keys = dict.fromkeys(
             [None, *(key for table in routing.values() for key in table)]
         )
+        # A finished job's return to its stock point ends its route, so that
+        # edge closes no cycle.
+        returns = [
+            (origin, destination)
+            for origin, destination in graph.edges
+            if self._nodes[destination].kind == "stock_point"
+        ]
         for key in keys:
             followed = nx.DiGraph()
             for origin, table in routing.items():
                 rule = table.get(None) if key is None else _rule(table, key)
                 for destination, _ in rule or ():
                     followed.add_edge(origin, destination)
+            followed.remove_edges_from(returns)
             if not nx.is_directed_acyclic_graph(followed):
                 self._cycle_error(key)
         # A cycle of finite buffers can deadlock, with each blocked server
         # waiting for room at the next station on the cycle.
+        flows = graph.copy()
+        flows.remove_edges_from(returns)
         cyclic = {
             name
-            for component in nx.strongly_connected_components(graph)
+            for component in nx.strongly_connected_components(flows)
             if len(component) > 1
             for name in component
         }
@@ -690,6 +745,7 @@ class Model:
             if unlinked_stock or unlinked_demand:
                 raise ValueError(f"{node.name!r} is not in a supply chain.")
         if self._supply is not None:
+            self._validate_production()
             return
         sources = [node for node in self._nodes.values() if node.kind == "source"]
         if not sources:
@@ -714,10 +770,65 @@ class Model:
         for source in sources:
             self._check_types(source)
 
+    def _validate_production(self) -> None:
+        """Check that the top stage's jobs reach every station and return to it."""
+        top = self._supply.stock_points[-1]
+        stations = [node for node in self._nodes.values() if node.kind == "station"]
+        for node in self._supply.stock_points:
+            if node.lead_time is not None and node.name in self._graph:
+                raise ValueError(
+                    f"{node.name!r} has a route, and only a stock point with "
+                    "lead_time=None produces at stations."
+                )
+        if top.lead_time is not None:
+            if stations:
+                raise ValueError(
+                    f"Stations in a supply chain make {top.name!r}'s orders, so "
+                    f"{top.name!r} needs lead_time=None and a route through them."
+                )
+            return
+        if top.name not in self._routing:
+            raise ValueError(
+                f"{top.name!r} produces, so it needs a route to its first station."
+            )
+        for node in stations:
+            if not nx.has_path(
+                G=self._graph,
+                source=top.name,
+                target=node.name,
+            ):
+                raise ValueError(f"{node.name!r} is unreachable from {top.name!r}.")
+            if nx.has_path(
+                G=self._graph,
+                source=node.name,
+                target=self.exit.name,
+            ):
+                raise ValueError(
+                    f"{node.name!r} routes to the exit, and production jobs "
+                    f"return to {top.name!r} instead."
+                )
+            if not nx.has_path(
+                G=self._graph,
+                source=node.name,
+                target=top.name,
+            ):
+                raise ValueError(f"{node.name!r} needs a route back to {top.name!r}.")
+            if node.patience is not None:
+                raise ValueError(
+                    f"{node.name!r} sets patience, and production jobs never abandon."
+                )
+            if node.external_overflow == "reject":
+                raise ValueError(
+                    f"{node.name!r} rejects outside arrivals, and released "
+                    "production jobs cannot be rejected."
+                )
+        self._check_types(top)
+
     def _check_types(self, source: Node) -> None:
         """Follow each of a source's types and check durations, ranks, and routes.
 
-        Routes may be added after stations, so these checks wait for a run.
+        Routes may be added after stations, so these checks wait for a run. A
+        stock point that produces is checked as the source of its untyped jobs.
         """
         for kind in (None,) if source.types is None else source.types:
             reached = set()
@@ -776,7 +887,7 @@ class Model:
         self.validate()
         if self._supply is not None:
             raise ValueError(
-                "diagram draws service routes, and a supply chain has none."
+                "diagram draws service networks, and this model has a supply chain."
             )
         return network_diagram(self)
 
@@ -802,7 +913,8 @@ class Model:
             raise ValueError("drain must be True or False.")
         if drain and self._supply is not None:
             raise ValueError(
-                "drain serves customers after closing, and a supply chain has none."
+                "drain serves customers after closing, and a supply chain reviews "
+                "only until closing."
             )
         return simulate(
             model=self,
@@ -851,6 +963,6 @@ class Model:
 
 
 _ONE_KIND = (
-    "A model holds either a service network or a supply chain, not both, until "
-    "stock points can release work to stations."
+    "A model with a supply chain has no arrival sources, since its stations "
+    "serve only the top stage's production jobs."
 )

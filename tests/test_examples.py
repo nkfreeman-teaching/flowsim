@@ -148,3 +148,28 @@ def test_bullwhip_study_compounds_without_sharing():
     # The retailer sees consumer demand either way, so only upstream changes.
     assert shared[0] == pytest.approx(private[0])
     assert shared[-1] < private[-1]
+
+
+def test_capacity_study_changes_fill_rates_but_not_orders():
+    comparison = supply_chain.capacity_study(replications=3)
+    factory = comparison.stock_points.filter(pl.col("stock_point") == "Factory")
+    ratios = {
+        scenario: rows.sort("replication").get_column("bullwhip_ratio").to_list()
+        for (scenario,), rows in factory.group_by("scenario")
+    }
+    # The inventory position counts units on order, so receipts never change
+    # it, and every scenario with a two-week cover places the same orders, up
+    # to the order in which floating-point stock and orders are added.
+    base = ratios["Two-week lead time"]
+    assert ratios["Brew 120 per week"] == pytest.approx(base, rel=1e-12)
+    assert ratios["Brew 200 per week"] == pytest.approx(base, rel=1e-12)
+    assert ratios["Brew 150, cover 3"] != pytest.approx(base, rel=1e-3)
+    fill = comparison.intervals(
+        metric="fill_rate",
+        stock_point="Factory",
+    )
+    means = dict(fill.select("scenario", "mean").rows())
+    assert means["Brew 120 per week"] < means["Brew 150 per week"]
+    assert means["Brew 150 per week"] < means["Brew 200 per week"]
+    jobs = comparison.experiments["Brew 150 per week"].runs[0].customers
+    assert jobs.get_column("quantity").max() == supply_chain.BATCH
