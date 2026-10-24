@@ -5,8 +5,8 @@ from pathlib import Path
 from flowsim import Model, compare
 
 # Machining line buffer plans, as waiting spaces in front of CNC, Wash,
-# Assembly, and Pack. The last two plans hold the same five or more spaces in
-# different places.
+# Assembly, and Pack. The last two plans hold the same eight spaces in different
+# places.
 BUFFER_PLANS = {
     "No buffers": (0, 0, 0, 0),
     "Two each": (2, 2, 2, 2),

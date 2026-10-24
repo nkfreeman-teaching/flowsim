@@ -302,6 +302,9 @@ class Comparison:
             differences=True,
             baseline=reference,
         )
+        # plots.style sets an 800-pixel width, so let each card set the width.
+        for figure in (means, changes):
+            figure.update_layout(width=None, autosize=True)
         means_html = means.to_html(
             full_html=False,
             include_plotlyjs=True,
