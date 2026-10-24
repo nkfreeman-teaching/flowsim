@@ -23,6 +23,8 @@ operations = "python -m examples.operations"
 supply-chain = "python -m examples.supply_chain"
 # Run every example end to end, including the notebook, after behavioral changes.
 examples = { depends-on = ["demo", "exercise", "extensions", "operations", "supply-chain", "lesson-check"] }
+# Render a video in manim/ with its own environment (see manim/README.md).
+manim-render = { cmd = "pixi run --manifest-path manim/pixi.toml render" }
 
 [dependencies]
 python = ">=3.12,<3.14"

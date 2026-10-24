@@ -1,0 +1,302 @@
+{
+  "sources": {
+    "manim/flowsim-core/snippets/compare.py": "4ae10a151ddf751e12543913c9699d3f6aae2dac42279d35911d278bb395c20e",
+    "manim/flowsim-core/snippets/queue.py": "975d054ab3fb08a2ae9ddabb31625de2de7ed043ed7a3020f76f225153c4e901",
+    "manim/flowsim-core/snippets/replications.py": "f9244381f0b70287cdab8c66507a11c5960f7f7bebbd3fb3579a344900f767f2",
+    "examples/models.py": "45afeb67e2c9ff6ee9aa4ffca22e6a5a6d425b3abac7d5894ae8a2dfd49ea4c7"
+  },
+  "images": {
+    "customers": {
+      "file": "customers.png",
+      "size": [
+        1318,
+        406
+      ]
+    },
+    "visits": {
+      "file": "visits.png",
+      "size": [
+        1338,
+        406
+      ]
+    },
+    "stations": {
+      "file": "stations.png",
+      "size": [
+        1216,
+        282
+      ]
+    },
+    "summary": {
+      "file": "summary.png",
+      "size": [
+        1068,
+        282
+      ]
+    },
+    "viewer_top": {
+      "file": "viewer_top.png",
+      "size": [
+        1888,
+        614
+      ]
+    },
+    "viewer_queues": {
+      "file": "viewer_queues.png",
+      "size": [
+        1380,
+        782
+      ]
+    },
+    "viewer_timeline": {
+      "file": "viewer_timeline.png",
+      "size": [
+        1380,
+        702
+      ]
+    },
+    "viewer_cards": {
+      "file": "viewer_cards.png",
+      "size": [
+        1888,
+        260
+      ]
+    },
+    "waits": {
+      "file": "waits.png",
+      "size": [
+        960,
+        344
+      ]
+    },
+    "means": {
+      "file": "means.png",
+      "size": [
+        948,
+        406
+      ]
+    },
+    "paired": {
+      "file": "paired.png",
+      "size": [
+        1240,
+        344
+      ]
+    },
+    "comparison_means": {
+      "file": "comparison_means.png",
+      "size": [
+        1888,
+        1230
+      ]
+    },
+    "comparison_differences": {
+      "file": "comparison_differences.png",
+      "size": [
+        1888,
+        834
+      ]
+    }
+  },
+  "queue": {
+    "arrival_time": [
+      0.0,
+      1.0,
+      2.0
+    ],
+    "exit_time": [
+      2.0,
+      4.0,
+      6.0
+    ],
+    "flow_time": [
+      2.0,
+      3.0,
+      4.0
+    ],
+    "total_wait": [
+      0.0,
+      1.0,
+      2.0
+    ],
+    "service_start": [
+      0.0,
+      2.0,
+      4.0
+    ],
+    "service_end": [
+      2.0,
+      4.0,
+      6.0
+    ],
+    "server_id": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "mean_wait": 1.0,
+    "mean_queue": 0.42857142857142855,
+    "utilization": 0.8571428571428571,
+    "capacity": 1,
+    "arrivals": 3,
+    "completed": 3,
+    "mean_flow_time": 3.0,
+    "throughput": 0.42857142857142855,
+    "end_time": 7.0,
+    "warmup": 0.0
+  },
+  "timeline_customer": 3,
+  "export_files": [
+    "activities.csv",
+    "customers.csv",
+    "failures.csv",
+    "metadata.json",
+    "states.csv",
+    "stations.csv",
+    "summary.csv",
+    "visits.csv"
+  ],
+  "viewer_bytes": 4861662,
+  "replications": {
+    "service_runs": [
+      2.43697746671219,
+      1.7330422465397552,
+      3.2699469820633347,
+      2.490205860478261,
+      2.2142609167904044,
+      0.6702982799154865,
+      2.8583988043417508,
+      1.4930223808700829,
+      1.7769935784416262,
+      1.4694162454014634,
+      2.9689823766624683,
+      1.3146957398380357,
+      1.4593055058180544,
+      1.957256243137012,
+      3.3048222424587066,
+      7.436621418421047,
+      2.1195750504181414,
+      5.045455455419882,
+      1.8820518584961383,
+      1.326170116573015
+    ],
+    "service_mean": 2.4613749384398433,
+    "service_lower": 1.7514635726521002,
+    "service_upper": 3.1712863042275865,
+    "runs": 20,
+    "confidence": 0.95,
+    "seeds_distinct": 20
+  },
+  "compare": {
+    "runs": {
+      "One server": [
+        37.63824937937204,
+        67.28372489037096,
+        89.3424238067946,
+        45.43380542282906,
+        113.23677880456437,
+        40.542626769142856,
+        77.93340387747995,
+        80.19870176078794,
+        99.58109579304256,
+        67.75899628346156,
+        124.92454605498521,
+        52.91651537797759,
+        64.5036485515296,
+        105.49852873258794,
+        63.47228623874797,
+        122.22099363508032,
+        115.16415516604016,
+        73.44161475061178,
+        78.76689363409263,
+        52.826344115760165
+      ],
+      "Two servers": [
+        3.379934720169234,
+        2.2546261444660574,
+        3.916924456280127,
+        3.490251953369174,
+        3.4736212930323602,
+        1.166965779922146,
+        3.7153160571806603,
+        2.4629778167099965,
+        2.5513529659380096,
+        2.0280093199566926,
+        3.71421171086384,
+        1.9211942065545144,
+        2.181181976509132,
+        3.0025268089053614,
+        3.825624258101934,
+        8.371910897445618,
+        2.6454036596511386,
+        5.887570924695625,
+        2.978398775114629,
+        1.8260825336012454
+      ],
+      "Three servers": [
+        1.2349095817141222,
+        0.7089051771890199,
+        0.9181588945360174,
+        1.3942378099007906,
+        1.5922478024913125,
+        0.5131691466023499,
+        1.2169811992048774,
+        1.2119094073956154,
+        1.0061737878493038,
+        0.7062142974392522,
+        1.1599159940738917,
+        0.7862548898375963,
+        0.9874853087887839,
+        1.333776263674451,
+        0.9752207120678749,
+        1.605540172043688,
+        0.6862145855312708,
+        1.9259952761184833,
+        1.2854685022965497,
+        0.6228899348634725
+      ]
+    },
+    "same_seeds": true,
+    "means": {
+      "One server": [
+        78.63426665226295,
+        65.87692014212455,
+        91.39161316240136
+      ],
+      "Two servers": [
+        3.2397043129233745,
+        2.49669129802788,
+        3.982717327818869
+      ],
+      "Three servers": [
+        1.0935834371809363,
+        0.9196996575934495,
+        1.267467216768423
+      ]
+    },
+    "differences": {
+      "Two servers": [
+        -75.39456233933959,
+        -87.83629539146492,
+        -62.95282928721426
+      ],
+      "Three servers": [
+        -77.54068321508203,
+        -90.24074467984467,
+        -64.84062175031939
+      ]
+    },
+    "baseline": [
+      "One server"
+    ]
+  },
+  "readme_blocks": {
+    "Branches and shared stations": "f610eb74aa6abcfe235a45bbc59c74e22805c40fc84aeefee9b4fc6c10174901",
+    "Customer types": "a963aa7be135df04f3ebff0fe9279281c64d549788ae4aa2cbbe1882526b16ff",
+    "Demand and staffing schedules": "a60b91d3bfd732aefa086d91309f9bc6a958ce80fd497b1f3f93ffad4bf0bfcc",
+    "Finite buffers and blocking": "cea2e75f49b54676c2fa17402759ae92df01300a1283ea28932984e0c6d6a567",
+    "Priorities and abandonment": "04df33c6d6874c1ec6eee919aaa65d5a68c18f261568efe6a62de52e85e6a5ba",
+    "Failures and repair": "095e8a258b2a9c176a926d76096f29b356d7ecbea15d3bc2fe02dd7b774e9cf1",
+    "Inventory and ordering": "bea3ffcea69b4e494fa93645eeb778ea12ec8c9578e51a89285af9f7a41a3049"
+  }
+}
