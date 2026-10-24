@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -300,15 +300,22 @@ class _Station:
             customer.admission_time = now
             customer.outside_wait = now - customer.arrival_time
             customer.total_wait += customer.outside_wait
+        distribution = self.node.service_time
+        label = f"Service time at {self.node.name!r}"
+        if isinstance(distribution, Mapping):
+            # Model.validate checks that every type reaching the station has one.
+            distribution = distribution[customer.customer_type]
+            label = f"Service time for type {customer.customer_type!r} at {self.node.name!r}"
         ticket.visit = _Visit(
             customer_id=customer.customer_id,
             source=customer.source,
+            customer_type=customer.customer_type,
             station=self.node.name,
             arrival_time=now,
             service_time=sample(
-                distribution=self.node.service_time,
+                distribution=distribution,
                 rng=self.run.streams[self.node.name].durations,
-                label=f"Service time at {self.node.name!r}",
+                label=label,
             ),
         )
         self.run.visits.append(ticket.visit)

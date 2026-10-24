@@ -135,8 +135,8 @@ unknown outcome with zero.
 
 | File | Contents |
 | --- | --- |
-| `customers.csv` | Each customer's system arrival, admission, exit, flow time, observed total wait and blocking, final status, and current station. |
-| `visits.csv` | Each station visit's arrival, service start, processing completion, departure, server identity, waiting, blocking, and sampled service requirement. |
+| `customers.csv` | Each customer's source, type, system arrival, admission, exit, flow time, observed total wait and blocking, final status, and current station. |
+| `visits.csv` | Each station visit's customer type, arrival, service start, processing completion, departure, server identity, waiting, blocking, and sampled service requirement. |
 | `states.csv` | Station queue and server counts after each time with a state change, plus closing and the end of service. |
 | `stations.csv` | Station counts, wait summaries, time-weighted queue lengths, and utilization. |
 | `summary.csv` | System counts at closing and after service, overtime, completed flow-time averages, throughput, and time-average work in process. |
@@ -147,15 +147,18 @@ unknown outcome with zero.
 ## Model features
 
 The examples above use one source, a straight route, and stations with a fixed
-number of servers. Branches, schedules, finite buffers, and failures extend
-that model. Schedules, buffers, and failures each require an explicit behavior
+number of servers. Branches, customer types, schedules, finite buffers, and
+failures extend that model. Schedules, buffers, and failures each require an explicit behavior
 argument, since the package does not choose a default for how a shift ends,
 where overflow goes, or when a failure clock runs. Runnable versions of these
 models are in `examples/models.py` and `examples/extensions.py`.
 
 To inspect a model, `model.nodes` maps each name to its node in definition
 order, and `model.graph` returns a frozen NetworkX copy of the routes with each
-edge's `probability`. Neither can change the model.
+edge's `probability`. An edge from a typed route holds `types` instead, i.e., a
+mapping from each customer type that may take it to its probability, and
+`model.routing` lists each node's destinations by customer type. None of these
+can change the model.
 
 ### Branches and shared stations
 
@@ -195,6 +198,81 @@ model.route([routine, model.exit])
 model.route([specialist, model.exit])
 results = model.run(duration=480)
 ```
+
+### Customer types
+
+A customer type is a label that a source draws for each arrival (e.g., a
+product, a call skill, or a patient acuity), and service times and routes may
+depend on it. `model.source(..., types={"A": 0.6, "B": 0.4})` gives each
+arrival type A with probability 0.6 and type B otherwise, and a one-type
+mapping gives every arrival that type without a draw. A station's
+`service_time` may be a mapping from type to duration, and `route` and
+`branch` take `types=[...]` to apply only to the listed types. A node holds
+either one route for every type or typed routes whose type lists do not
+overlap. Customers from a source without `types` have no type, so the
+`customer_type` column is empty for them.
+
+Each type's own routes must be acyclic, but routes across types may form a
+cycle, which is the classic job shop. For example, type A below visits the Mill
+and then the Lathe, while type B visits the Lathe and then the Mill. A cycle of
+finite buffers could deadlock, with each blocked server waiting for room at the
+next station on the cycle, so a station on a cycle across types must have an
+unlimited buffer, and `route` raises an error otherwise. Routes may be added
+after their stations, so `run` checks that every type that can reach a station
+has a service time and a route there, and the error names the station, the
+type, and the source.
+
+```python
+import polars as pl
+
+from flowsim import Model
+
+model = Model()
+orders = model.source(
+    name="Orders",
+    interarrival=lambda rng: rng.exponential(scale=4),
+    types={"A": 0.6, "B": 0.4},
+)
+mill = model.station(
+    name="Mill",
+    capacity=1,
+    service_time={"A": 1.5, "B": lambda rng: rng.uniform(1, 2)},
+)
+lathe = model.station(
+    name="Lathe",
+    capacity=1,
+    service_time={"A": 1, "B": 2.5},
+)
+model.branch(
+    origin=orders,
+    destinations={mill: 1},
+    types=["A"],
+)
+model.branch(
+    origin=orders,
+    destinations={lathe: 1},
+    types=["B"],
+)
+model.route(
+    [mill, lathe, model.exit],
+    types=["A"],
+)
+model.route(
+    [lathe, mill, model.exit],
+    types=["B"],
+)
+results = model.run(duration=480)
+waits = results.visits.group_by(
+    "customer_type",
+    "station",
+).agg(pl.col("wait_time").mean())
+```
+
+The type draw uses its own random stream at each source, so adding types to a
+source leaves its arrival times unchanged for a given seed. The `customers` and
+`visits` tables carry each customer's `customer_type`, and the viewer adds a
+type column when any customer has one. Waits by type come from a `group_by` on
+`visits`, as above, and FlowSim adds no per-type replication metric.
 
 ### Demand and staffing schedules
 
@@ -768,8 +846,9 @@ path that does not exist fails the tests.
 
 ## Scope and limits
 
-FlowSim supports acyclic routes, first-come, first-served service, identical
-servers within each station, scheduled demand and staffing, finite buffers,
+FlowSim supports routes that are acyclic for each customer type (routes across
+types may cycle through stations with unlimited buffers), first-come,
+first-served service, identical servers within each station, scheduled demand and staffing, finite buffers,
 blocking after service, and independent failures with resumable work. Every
 station has its own server pool. Priorities, reneging, batches, workers shared
 across stations, shared repair crews, and rework loops are not implemented.

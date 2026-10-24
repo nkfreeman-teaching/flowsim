@@ -33,10 +33,15 @@ class Node:
     name: str
     kind: str
     interarrival: Duration | None = None
-    service_time: Duration | None = None
+    # A station's one duration, or a read-only mapping from customer type to
+    # duration.
+    service_time: Duration | Mapping[str, Duration] | None = None
     capacity: int = 0
     first_arrival: float | None = None
     limit: int | None = None
+    # A source's read-only mapping from customer type to probability, or None
+    # for customers without a type.
+    types: Mapping[str, float] | None = None
     arrival_rates: tuple[tuple[float, float], ...] | None = None
     staffing: tuple[tuple[float, int], ...] | None = None
     shift_end: str | None = None
@@ -57,6 +62,65 @@ class Node:
 # to a supply chain instead, which has no routes.
 NETWORK_KINDS = {"source", "station", "exit"}
 
+# One routing rule's destinations and probabilities, in the order given.
+Choices = tuple[tuple[str, float], ...]
+
+
+def _type_name(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Customer types must be nonempty names, not {value!r}.")
+    return value
+
+
+def _type_mix(types: object) -> Mapping[str, float]:
+    if not isinstance(types, Mapping) or not types:
+        raise ValueError("types must map each customer type to its probability.")
+    probabilities = {
+        _type_name(kind): number(
+            value=probability,
+            label=f"Probability of type {kind!r}",
+            positive=True,
+        )
+        for kind, probability in types.items()
+    }
+    if not math.isclose(
+        a=sum(probabilities.values()),
+        b=1.0,
+        rel_tol=0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("Type probabilities must sum to one.")
+    return MappingProxyType(probabilities)
+
+
+def _service_times(times: Mapping) -> Mapping[str, Duration]:
+    if not times:
+        raise ValueError("A service time mapping needs at least one customer type.")
+    durations = {}
+    for kind, duration in times.items():
+        name = _type_name(kind)
+        if not callable(duration):
+            number(duration, f"Service time for type {name!r}")
+        durations[name] = duration
+    return MappingProxyType(durations)
+
+
+def _route_types(types: object) -> tuple[str | None, ...]:
+    """Return the rule keys for a route or branch, where None means every type."""
+    if types is None:
+        return (None,)
+    if isinstance(types, str) or not isinstance(types, Sequence) or not types:
+        raise ValueError("types must be a nonempty list of customer types.")
+    names = tuple(_type_name(kind) for kind in types)
+    if len(set(names)) != len(names):
+        raise ValueError("A route cannot list a customer type twice.")
+    return names
+
+
+def _rule(table: Mapping[str | None, Choices], kind: str | None) -> Choices | None:
+    """Return the rule a customer of this type follows from one node."""
+    return table[None] if None in table else table.get(kind)
+
 
 @dataclass(
     frozen=True,
@@ -71,7 +135,11 @@ class SupplyChain:
 
 
 class Model:
-    """An acyclic network of first-come, first-served service stations."""
+    """A network of first-come, first-served service stations.
+
+    Each customer type's routes are acyclic. Routes across types may form a
+    cycle only through stations with unlimited buffers.
+    """
 
     def __init__(self, time_unit: str = "minutes"):
         if not isinstance(time_unit, str) or not time_unit.strip():
@@ -79,6 +147,9 @@ class Model:
         self.time_unit = time_unit.strip()
         self._nodes: dict[str, Node] = {}
         self._graph = nx.DiGraph()
+        # Each origin's routing rules by customer type, where the key None holds
+        # one rule for every type.
+        self._routing: dict[str, dict[str | None, Choices]] = {}
         self._supply: SupplyChain | None = None
         self.exit = self._add(
             Node(
@@ -94,8 +165,26 @@ class Model:
 
     @property
     def graph(self) -> nx.DiGraph:
-        """Return a frozen copy of the routes, with each edge's probability."""
+        """Return a frozen copy of the routes across every customer type.
+
+        An edge from an untyped route or branch holds its probability. An edge
+        from a typed one instead holds types, a mapping from each customer type
+        that may take the edge to its probability.
+        """
         return nx.freeze(self._graph.copy())
+
+    @property
+    def routing(self) -> Mapping[str, Mapping[str | None, Choices]]:
+        """Return each node's destinations and probabilities by customer type.
+
+        The key None holds a node's one route for every type.
+        """
+        return MappingProxyType(
+            {
+                origin: MappingProxyType(dict(table))
+                for origin, table in self._routing.items()
+            }
+        )
 
     @property
     def supply_chain(self) -> SupplyChain | None:
@@ -129,8 +218,13 @@ class Model:
         first_arrival: Real | None = None,
         limit: int | None = None,
         rates: Sequence[tuple[float, float]] | None = None,
+        types: Mapping[str, Real] | None = None,
     ) -> Node:
-        """Create arrivals, with the first arrival sampled unless specified."""
+        """Create arrivals, with the first arrival sampled unless specified.
+
+        types maps each customer type to the probability that an arrival has it.
+        Without types, customers have no type.
+        """
         if (interarrival is None) == (rates is None):
             raise ValueError("Provide either interarrival or rates, but not both.")
         arrival_rates = None
@@ -166,6 +260,7 @@ class Model:
                 interarrival=interarrival,
                 first_arrival=first,
                 limit=count,
+                types=None if types is None else _type_mix(types),
                 arrival_rates=arrival_rates,
             )
         )
@@ -174,7 +269,7 @@ class Model:
         self,
         name: str,
         capacity: int,
-        service_time: Duration,
+        service_time: Duration | Mapping[str, Duration],
         *,
         staffing: Sequence[tuple[float, float]] | None = None,
         shift_end: str | None = None,
@@ -184,9 +279,15 @@ class Model:
         repair_time: Duration | None = None,
         failure_clock: str | None = None,
     ) -> Node:
-        """Create servers, with optional schedules, waiting limits, and failures."""
+        """Create servers, with optional schedules, waiting limits, and failures.
+
+        service_time is one duration, or a mapping from customer type to the
+        duration for that type.
+        """
         count = integer(capacity, "Station capacity")
-        if not callable(service_time):
+        if isinstance(service_time, Mapping):
+            service_time = _service_times(service_time)
+        elif not callable(service_time):
             number(service_time, "Service time")
         staff = None
         if staffing is not None:
@@ -363,32 +464,43 @@ class Model:
             period=length,
         )
 
-    def route(self, nodes: Sequence[Node]) -> None:
-        """Connect a sequence, without replacing an existing route."""
+    def route(
+        self,
+        nodes: Sequence[Node],
+        *,
+        types: Sequence[str] | None = None,
+    ) -> None:
+        """Connect a sequence, without replacing an existing route.
+
+        With types, only customers of those types follow it.
+        """
         if len(nodes) < 2:
             raise ValueError("A route needs at least two nodes.")
         for node in nodes:
             self._owned(node)
+        keys = _route_types(types)
         edges = list(zip(nodes[:-1], nodes[1:]))
         for origin, destination in edges:
             self._check_edge(origin, destination)
-            current = list(self._graph.successors(origin.name))
-            if current and (
-                current != [destination.name]
-                or self._graph[origin.name][destination.name]["probability"] != 1
-            ):
-                raise ValueError(f"{origin.name!r} already has a different route.")
-        # Validate the complete edit before modifying the model.
-        proposal = self._graph.copy()
-        proposal.add_edges_from([(a.name, b.name) for a, b in edges])
-        if not nx.is_directed_acyclic_graph(proposal):
-            raise ValueError("FlowSim supports acyclic routes only.")
+        if len({node.name for node in nodes}) != len(nodes):
+            self._cycle_error(keys[0])
+        rules = []
         for origin, destination in edges:
-            self._graph.add_edge(
-                u_of_edge=origin.name,
-                v_of_edge=destination.name,
-                probability=1.0,
-            )
+            choices = ((destination.name, 1.0),)
+            for key in keys:
+                # Repeating a node's existing route is allowed.
+                if self._routing.get(origin.name, {}).get(key) == choices:
+                    continue
+                self._check_free(
+                    origin=origin,
+                    key=key,
+                    message=(
+                        f"{origin.name!r} already has a different route"
+                        + ("." if key is None else f" for type {key!r}.")
+                    ),
+                )
+                rules.append((origin.name, key, choices))
+        self._commit(rules)
 
     def _check_edge(self, origin: Node, destination: Node) -> None:
         if origin.kind == "exit":
@@ -396,13 +508,30 @@ class Model:
         if destination.kind == "source":
             raise ValueError("A source cannot receive routed customers.")
 
-    def branch(self, origin: Node, destinations: Mapping[Node, float]) -> None:
-        """Choose one destination per customer using fixed probabilities."""
+    def branch(
+        self,
+        origin: Node,
+        destinations: Mapping[Node, float],
+        *,
+        types: Sequence[str] | None = None,
+    ) -> None:
+        """Choose one destination per customer using fixed probabilities.
+
+        With types, only customers of those types follow it.
+        """
         self._owned(origin)
         if not destinations:
             raise ValueError("A branch needs at least one destination.")
-        if self._graph.out_degree(origin.name):
-            raise ValueError(f"{origin.name!r} already has an outgoing route.")
+        keys = _route_types(types)
+        for key in keys:
+            self._check_free(
+                origin=origin,
+                key=key,
+                message=(
+                    f"{origin.name!r} already has an outgoing route"
+                    + ("." if key is None else f" for type {key!r}.")
+                ),
+            )
         probabilities = []
         for destination, probability in destinations.items():
             self._owned(destination)
@@ -421,16 +550,84 @@ class Model:
             abs_tol=1e-12,
         ):
             raise ValueError("Branch probabilities must sum to one.")
-        proposal = self._graph.copy()
-        proposal.add_edges_from([(origin.name, node.name) for node in destinations])
-        if not nx.is_directed_acyclic_graph(proposal):
-            raise ValueError("FlowSim supports acyclic routes only.")
-        for destination, probability in zip(destinations, probabilities):
-            self._graph.add_edge(
-                u_of_edge=origin.name,
-                v_of_edge=destination.name,
-                probability=probability,
+        choices = tuple(
+            (destination.name, probability)
+            for destination, probability in zip(destinations, probabilities)
+        )
+        self._commit([(origin.name, key, choices) for key in keys])
+
+    def _check_free(self, origin: Node, key: str | None, message: str) -> None:
+        """Reject a rule that would overlap one of the origin's existing rules."""
+        current = self._routing.get(origin.name, {})
+        if (key is None and current) or key in current:
+            raise ValueError(message)
+        if key is not None and None in current:
+            raise ValueError(
+                f"{origin.name!r} already has a route for every customer type."
             )
+
+    def _cycle_error(self, key: str | None) -> None:
+        if key is None:
+            raise ValueError("FlowSim supports acyclic routes only.")
+        raise ValueError(
+            f"The routes for type {key!r} form a cycle. Each customer type's "
+            "routes must be acyclic."
+        )
+
+    def _commit(self, rules: list[tuple[str, str | None, Choices]]) -> None:
+        """Validate new routing rules as one edit, then add them to the model."""
+        routing = {origin: dict(table) for origin, table in self._routing.items()}
+        graph = self._graph.copy()
+        for origin, key, choices in rules:
+            routing.setdefault(origin, {})[key] = choices
+            for destination, probability in choices:
+                if key is None:
+                    graph.add_edge(
+                        u_of_edge=origin,
+                        v_of_edge=destination,
+                        probability=probability,
+                    )
+                    continue
+                if graph.has_edge(origin, destination):
+                    types = dict(graph[origin][destination]["types"])
+                else:
+                    types = {}
+                types[key] = probability
+                graph.add_edge(
+                    u_of_edge=origin,
+                    v_of_edge=destination,
+                    types=MappingProxyType(types),
+                )
+        # Check the untyped routes, then each type's routes in first-use order.
+        keys = dict.fromkeys(
+            [None, *(key for table in routing.values() for key in table)]
+        )
+        for key in keys:
+            followed = nx.DiGraph()
+            for origin, table in routing.items():
+                rule = table.get(None) if key is None else _rule(table, key)
+                for destination, _ in rule or ():
+                    followed.add_edge(origin, destination)
+            if not nx.is_directed_acyclic_graph(followed):
+                self._cycle_error(key)
+        # A cycle of finite buffers can deadlock, with each blocked server
+        # waiting for room at the next station on the cycle.
+        cyclic = {
+            name
+            for component in nx.strongly_connected_components(graph)
+            if len(component) > 1
+            for name in component
+        }
+        for node in self._nodes.values():
+            if node.name in cyclic and node.buffer is not None:
+                raise ValueError(
+                    f"{node.name!r} has a finite buffer and lies on a cycle of "
+                    "routes across customer types. Blocked servers on such a "
+                    "cycle can wait on each other forever, so its stations need "
+                    "unlimited buffers."
+                )
+        self._routing = routing
+        self._graph = graph
 
     def validate(self) -> None:
         """Reject disconnected stations and routes that cannot reach the exit."""
@@ -464,6 +661,46 @@ class Model:
                 target=self.exit.name,
             ):
                 raise ValueError(f"{node.name!r} needs a route to the exit.")
+        for source in sources:
+            self._check_types(source)
+
+    def _check_types(self, source: Node) -> None:
+        """Follow each of a source's types and check service times and routes.
+
+        Routes may be added after stations, so these checks wait for a run.
+        """
+        for kind in (None,) if source.types is None else source.types:
+            reached = set()
+            stack = [source.name]
+            while stack:
+                name = stack.pop()
+                if name in reached or name == self.exit.name:
+                    continue
+                reached.add(name)
+                node = self._nodes[name]
+                typed = isinstance(node.service_time, Mapping)
+                if typed and kind is None:
+                    raise ValueError(
+                        f"{name!r} sets service times by customer type, and "
+                        f"customers from {source.name!r} have no type."
+                    )
+                if typed and kind not in node.service_time:
+                    raise ValueError(
+                        f"{name!r} has no service time for type {kind!r}, which "
+                        f"can reach it from {source.name!r}."
+                    )
+                rule = _rule(self._routing[name], kind)
+                if rule is None and kind is None:
+                    raise ValueError(
+                        f"{name!r} routes by customer type, and customers from "
+                        f"{source.name!r} have no type."
+                    )
+                if rule is None:
+                    raise ValueError(
+                        f"{name!r} has no route for type {kind!r}, which can "
+                        f"reach it from {source.name!r}."
+                    )
+                stack.extend(destination for destination, _ in rule)
 
     def diagram(self) -> Figure:
         self.validate()

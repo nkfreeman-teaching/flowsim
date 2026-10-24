@@ -19,10 +19,11 @@ ordering policies in `flowsim/policies.py`, and notebook interfaces in
   with scheduler event priorities.
 - Verify timing and metrics with hand-calculated examples, not only simulator
   output.
-- Routes remain acyclic, and service remains first-come, first-served.
-  Schedules, finite buffers, and failures require explicit behavior arguments.
-  Do not choose global defaults for shift ending, overflow, or failure clocks
-  without an owner decision.
+- Each customer type's routes remain acyclic, and routes across types may
+  cycle only through stations with unlimited buffers. Service remains
+  first-come, first-served. Schedules, finite buffers, and failures require
+  explicit behavior arguments. Do not choose global defaults for shift
+  ending, overflow, or failure clocks without an owner decision.
 - Library tests never import from `examples/`. Shared models live in
   `tests/models.py`, and one-off hand-calculation models may be built inline.
   Only `tests/test_examples.py` and `tests/test_readme.py` use `examples/`,

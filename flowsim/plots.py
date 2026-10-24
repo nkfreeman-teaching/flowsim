@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -75,10 +76,37 @@ def station_menu(figure: go.Figure, stations: list[str]) -> None:
     )
 
 
+def layout_layers(model: Model) -> list[list[str]]:
+    """Group nodes into left-to-right layers for the network diagram.
+
+    An acyclic graph uses topological generations. Routes that cycle across
+    customer types have none, so sources come first, each station sits at its
+    fewest steps from a source, and the exit comes last.
+    """
+    graph = model.graph
+    if nx.is_directed_acyclic_graph(graph):
+        return [list(names) for names in nx.topological_generations(graph)]
+    sources = [node.name for node in model.nodes.values() if node.kind == "source"]
+    steps = nx.multi_source_dijkstra_path_length(graph, sources)
+    last = max(steps[name] for name in graph if name != model.exit.name) + 1
+    steps[model.exit.name] = last
+    return [[name for name in graph if steps[name] == step] for step in range(last + 1)]
+
+
+def edge_label(data: dict) -> str:
+    """Name each type that may take a typed edge, or give an untyped share."""
+    if "probability" in data:
+        return "" if data["probability"] == 1 else f"{data['probability']:.0%}"
+    return ", ".join(
+        label(kind) if probability == 1 else f"{label(kind)} {probability:.0%}"
+        for kind, probability in data["types"].items()
+    )
+
+
 def network_diagram(model: Model) -> go.Figure:
     graph = model.graph
     positions = {}
-    layers = list(nx.topological_generations(graph))
+    layers = layout_layers(model)
     for layer, names in enumerate(layers):
         for index, name in enumerate(names):
             positions[name] = (layer, (len(names) - 1) / 2 - index)
@@ -86,10 +114,36 @@ def network_diagram(model: Model) -> go.Figure:
     for origin, target, data in graph.edges(data=True):
         x_start, y_start = positions[origin]
         x_end, y_end = positions[target]
+        x_label = (x_start + x_end) / 2
+        y_label = (y_start + y_end) / 2 + 0.1
+        twin = graph.has_edge(target, origin)
+        if x_end > x_start and not twin:
+            # A forward edge stops short of each node horizontally.
+            x_start, x_end = x_start + 0.17, x_end - 0.17
+        else:
+            # Other edges stop short along their direction, and an edge whose
+            # reverse also exists shifts to its own left, so the two stay apart.
+            dx, dy = x_end - x_start, y_end - y_start
+            length = math.hypot(dx, dy)
+            ux, uy = dx / length, dy / length
+            # A vertical pair shifts farther, past the station labels.
+            shift = 0 if not twin else 0.2 if abs(dy) > abs(dx) else 0.08
+            x_start, y_start = (
+                x_start + 0.17 * ux - shift * uy,
+                y_start + 0.17 * uy + shift * ux,
+            )
+            x_end, y_end = (
+                x_end - 0.17 * ux - shift * uy,
+                y_end - 0.17 * uy + shift * ux,
+            )
+            # A label sits just outside its arrow, on the same side.
+            away = 0.1 if twin else 0
+            x_label = (x_start + x_end) / 2 - away * uy
+            y_label = (y_start + y_end) / 2 + away * ux + (0 if twin else 0.1)
         figure.add_annotation(
-            x=x_end - 0.17,
+            x=x_end,
             y=y_end,
-            ax=x_start + 0.17,
+            ax=x_start,
             ay=y_start,
             xref="x",
             yref="y",
@@ -101,11 +155,12 @@ def network_diagram(model: Model) -> go.Figure:
             arrowcolor=GRAY,
             text="",
         )
-        if data["probability"] != 1:
+        text = edge_label(data)
+        if text:
             figure.add_annotation(
-                x=(x_start + x_end) / 2,
-                y=(y_start + y_end) / 2 + 0.1,
-                text=f"{data['probability']:.0%}",
+                x=x_label,
+                y=y_label,
+                text=text,
                 showarrow=False,
                 bgcolor="white",
             )

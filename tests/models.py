@@ -205,3 +205,51 @@ def beer_chain(forecast_from: str = "orders") -> Model:
         period=1,
     )
     return model
+
+
+def job_shop(lathe_buffer: int | None = None) -> Model:
+    """One order of each type at time 0, visiting the machines in opposite orders.
+
+    A takes the Mill for 1 and then the Lathe for 2. B takes the Lathe for 3
+    and then the Mill for 1.
+    """
+    model = Model()
+    first = model.source(
+        name="A orders",
+        interarrival=10,
+        first_arrival=0,
+        limit=1,
+        types={"A": 1},
+    )
+    second = model.source(
+        name="B orders",
+        interarrival=10,
+        first_arrival=0,
+        limit=1,
+        types={"B": 1},
+    )
+    mill = model.station(
+        name="Mill",
+        capacity=1,
+        service_time={"A": 1, "B": 1},
+    )
+    options = (
+        {}
+        if lathe_buffer is None
+        else {"buffer": lathe_buffer, "external_overflow": "wait"}
+    )
+    lathe = model.station(
+        name="Lathe",
+        capacity=1,
+        service_time={"A": 2, "B": 3},
+        **options,
+    )
+    model.route(
+        [first, mill, lathe, model.exit],
+        types=["A"],
+    )
+    model.route(
+        [second, lathe, mill, model.exit],
+        types=["B"],
+    )
+    return model

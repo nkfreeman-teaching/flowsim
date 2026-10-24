@@ -877,6 +877,7 @@ def test_record_tables_read_columns_by_name():
     visit = results._Visit(
         customer_id=4,
         source="Customers",
+        customer_type="Repair",
         station="Service",
         arrival_time=1.0,
         service_start=3.0,
@@ -891,6 +892,7 @@ def test_record_tables_read_columns_by_name():
     assert row == {
         "customer_id": 4,
         "source": "Customers",
+        "customer_type": "Repair",
         "station": "Service",
         "arrival_time": 1.0,
         "service_start": 3.0,

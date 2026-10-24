@@ -222,7 +222,8 @@
       Plotly.react("timeline", [], {height: 350, template: "plotly_white"}, config);
       return;
     }
-    info.textContent = "Customer " + id + " arrived at " + format(customer.arrival_time) + " " + unit +
+    info.textContent = "Customer " + id + (customer.customer_type === null ? "" : " (type " + customer.customer_type + ")") +
+      " arrived at " + format(customer.arrival_time) + " " + unit +
       ". Status: " + customer.status.replaceAll("_", " ") + ". " +
       (customer.status === "rejected" ? "The customer did not enter the service network." :
        customer.exit_time === null ? "Unfinished activity is shown through the service limit." :
@@ -253,6 +254,8 @@
   document.getElementById("customer-choice").addEventListener("change", showCustomer);
   showCustomer();
   let page = 0; const pageSize = 25;
+  // The type column appears only when some customer has a type.
+  const typed = result.customers.some(row => row.customer_type !== null);
   function customerTable() {
     const status = document.getElementById("status-choice").value;
     const rows = result.customers.filter(row => status === "all" || row.status === status)
@@ -260,10 +263,11 @@
     const pages = Math.max(1, Math.ceil(rows.length / pageSize));
     page = Math.min(Math.max(page, 0), pages - 1);
     table(document.getElementById("customers"), rows.slice(page * pageSize, (page + 1) * pageSize), [
-      ["customer_id", "Customer ID"], ["source", "Source"], ["arrival_time", "Arrival (" + unit + ")"],
+      ["customer_id", "Customer ID"], ["source", "Source"]].concat(typed ? [["customer_type", "Type"]] : []).concat([
+      ["arrival_time", "Arrival (" + unit + ")"],
       ["exit_time", "Exit (" + unit + ")"], ["flow_time", "Flow time (" + unit + ")"],
       ["status", "Status"], ["station", "Current station"]
-    ], row => { document.getElementById("customer-choice").value = row.customer_id; showCustomer(); document.getElementById("timeline").scrollIntoView({behavior: "smooth", block: "center"}); });
+    ]), row => { document.getElementById("customer-choice").value = row.customer_id; showCustomer(); document.getElementById("timeline").scrollIntoView({behavior: "smooth", block: "center"}); });
     document.getElementById("page-details").textContent = "Page " + (page + 1) + " of " + pages + ". " + rows.length + " matching customers.";
     document.getElementById("previous").disabled = page === 0;
     document.getElementById("next").disabled = page === pages - 1;

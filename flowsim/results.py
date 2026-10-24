@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 CUSTOMER_SCHEMA = {
     "customer_id": pl.Int64,
     "source": pl.String,
+    "customer_type": pl.String,
     "arrival_time": pl.Float64,
     "exit_time": pl.Float64,
     "flow_time": pl.Float64,
@@ -36,6 +37,7 @@ CUSTOMER_SCHEMA = {
 VISIT_SCHEMA = {
     "customer_id": pl.Int64,
     "source": pl.String,
+    "customer_type": pl.String,
     "station": pl.String,
     "arrival_time": pl.Float64,
     "service_start": pl.Float64,
@@ -189,6 +191,8 @@ class Phase(StrEnum):
 class _Customer:
     customer_id: int
     source: str
+    # None for a customer from a source without types.
+    customer_type: str | None = None
     arrival_time: float
     exit_time: float | None = None
     flow_time: float | None = None
@@ -209,6 +213,7 @@ class _Customer:
 class _Visit:
     customer_id: int
     source: str
+    customer_type: str | None = None
     station: str
     arrival_time: float
     service_start: float | None = None
@@ -981,8 +986,11 @@ class Results:
             "seed": self.seed,
             "capacities": self.capacities,
             "definitions": self.definitions,
+            # A typed edge lists each type that may take it, with its probability.
             "routes": [
                 {"from": origin, "to": target, "probability": data["probability"]}
+                if "probability" in data
+                else {"from": origin, "to": target, "types": dict(data["types"])}
                 for origin, target, data in self.graph.edges(data=True)
             ],
             "state_window": "[warmup, duration)",

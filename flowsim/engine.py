@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import zlib
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING
 
@@ -45,6 +46,7 @@ SETTLED_PRIORITY = 5
 DURATION_STREAM = 0
 ROUTING_STREAM = 1
 SERVER_STREAMS = 2
+TYPE_STREAM = 3
 
 
 @dataclass(
@@ -52,14 +54,15 @@ SERVER_STREAMS = 2
     slots=True,
 )
 class _Streams:
-    """A node's generators for its own durations and its routing choices.
+    """A node's generators for its durations, routing choices, and types.
 
-    A source draws interarrival times from durations, and a station draws
-    service times from it.
+    A source draws interarrival times from durations and its customers' types
+    from types, and a station draws service times from durations.
     """
 
     durations: np.random.Generator
     routing: np.random.Generator
+    types: np.random.Generator
 
 
 @dataclass(
@@ -130,7 +133,6 @@ class _Run:
         self.finished = self.scheduler.event()
         self.streams: dict[str, _Streams] = {}
         nodes = model.nodes
-        graph = model.graph
         names = list(nodes)
         keys: dict[str, int] = {}
         owners: dict[int, str] = {}
@@ -156,28 +158,29 @@ class _Run:
             self.streams[name] = _Streams(
                 durations=np.random.default_rng(node_seed(name, DURATION_STREAM)),
                 routing=np.random.default_rng(node_seed(name, ROUTING_STREAM)),
+                types=np.random.default_rng(node_seed(name, TYPE_STREAM)),
             )
-        # Routes are fixed for the run, so each node's choices are built once.
-        self.routes: dict[str, _Route] = {}
-        for name in graph.nodes:
-            destinations = list(graph.successors(name))
-            if not destinations:
-                continue
-            probabilities = None
-            if len(destinations) > 1:
-                probabilities = np.asarray(
-                    [
-                        graph[name][destination]["probability"]
-                        for destination in destinations
-                    ],
-                    dtype=float,
+        # Routes are fixed for the run, so each node's choices are built once,
+        # keyed by customer type, where None is a route for every type.
+        self.routes: dict[str, dict[str | None, _Route]] = {}
+        for name, table in model.routing.items():
+            self.routes[name] = {}
+            for kind, choices in table.items():
+                probabilities = None
+                if len(choices) > 1:
+                    probabilities = np.asarray(
+                        [probability for _, probability in choices],
+                        dtype=float,
+                    )
+                    # Normalize floating-point roundoff after the model's
+                    # sum-to-one check.
+                    probabilities /= probabilities.sum()
+                self.routes[name][kind] = _Route(
+                    destinations=tuple(
+                        nodes[destination] for destination, _ in choices
+                    ),
+                    probabilities=probabilities,
                 )
-                # Normalize floating-point roundoff after the model's sum-to-one check.
-                probabilities /= probabilities.sum()
-            self.routes[name] = _Route(
-                destinations=tuple(nodes[destination] for destination in destinations),
-                probabilities=probabilities,
-            )
         self.stations: dict[str, _Station] = {}
         for name in names:
             node = nodes[name]
@@ -230,16 +233,22 @@ class _Run:
         Sampling functions match only when they are the same object, so two
         separately built models with their own lambdas never match.
         """
+
+        def key(value: object) -> object:
+            if callable(value):
+                return _Same(value)
+            if isinstance(value, Mapping):
+                return tuple((name, key(item)) for name, item in value.items())
+            return value
+
         nodes = tuple(
-            tuple(
-                _Same(value) if callable(value) else value
-                for value in (getattr(node, field.name) for field in fields(node))
-            )
+            tuple(key(getattr(node, field.name)) for field in fields(node))
             for node in self.model.nodes.values()
         )
         routes = tuple(
-            (origin, target, data["probability"])
-            for origin, target, data in self.model.graph.edges(data=True)
+            (origin, kind, choices)
+            for origin, table in self.model.routing.items()
+            for kind, choices in table.items()
         )
         chain = self.model.supply_chain
         supply = (
@@ -253,8 +262,10 @@ class _Run:
         )
         return (self.model.time_unit, nodes, routes, supply)
 
-    def next_node(self, name: str) -> Node:
-        route = self.routes[name]
+    def next_node(self, name: str, customer: _Customer) -> Node:
+        # Model.validate checks that each type reaching a node has a route.
+        table = self.routes[name]
+        route = table[None] if None in table else table[customer.customer_type]
         if route.probabilities is None:
             return route.destinations[0]
         index = self.streams[name].routing.choice(
@@ -290,6 +301,11 @@ class _Run:
 
     def source(self, node: Node):
         rng = self.streams[node.name].durations
+        kinds = None if node.types is None else list(node.types)
+        weights = None
+        if kinds is not None and len(kinds) > 1:
+            weights = np.asarray(list(node.types.values()), dtype=float)
+            weights /= weights.sum()
         if node.limit == 0:
             return
         arrival = node.first_arrival
@@ -302,9 +318,18 @@ class _Run:
                 arrival - self.scheduler.now,
                 priority=ARRIVAL_PRIORITY,
             )
+            # A source with one type draws nothing for it.
+            kind = None
+            if weights is not None:
+                kind = kinds[
+                    self.streams[node.name].types.choice(len(kinds), p=weights)
+                ]
+            elif kinds is not None:
+                kind = kinds[0]
             customer = _Customer(
                 customer_id=len(self.customers) + 1,
                 source=node.name,
+                customer_type=kind,
                 arrival_time=float(self.scheduler.now),
             )
             self.customers.append(customer)
@@ -316,7 +341,7 @@ class _Run:
             arrival = self.next_arrival_time(node, rng)
 
     def customer(self, customer: _Customer, source: Node):
-        node = self.next_node(source.name)
+        node = self.next_node(source.name, customer)
         if node.kind == "exit":
             customer.admitted = True
             customer.admission_time = float(self.scheduler.now)
@@ -330,7 +355,7 @@ class _Run:
             yield ticket.admitted
             while True:
                 yield ticket.finished
-                destination = self.next_node(node.name)
+                destination = self.next_node(node.name, customer)
                 if destination.kind == "exit":
                     station.release(ticket)
                     break
@@ -541,6 +566,7 @@ class _Run:
             supply=self.supply_settings(),
             definitions={
                 name: {
+                    "types": None if node.types is None else dict(node.types),
                     "arrival_rates": node.arrival_rates,
                     "staffing": node.staffing,
                     "shift_end": node.shift_end,

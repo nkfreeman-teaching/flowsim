@@ -8,6 +8,7 @@ from tests.models import (
     beer_chain,
     combined_line,
     deterministic_queue,
+    job_shop,
     service_network,
 )
 
@@ -45,6 +46,8 @@ def test_offline_viewer_controls_and_download(tmp_path, offline_page, drain):
     page.fill("#customer-choice", "2")
     page.click("#show-customer")
     assert "Customer 2 arrived" in page.locator("#customer-details").inner_text()
+    # Customers without a type get no type column.
+    assert "Type" not in page.locator("#customers thead").all_text_contents()[0]
     page.select_option("#status-choice", "in_service")
     # The expected counts come from the run, so this test checks the viewer's
     # filter and download rather than a seeded count.
@@ -66,6 +69,27 @@ def test_offline_viewer_controls_and_download(tmp_path, offline_page, drain):
     )
     assert downloaded.height == result.customers.height
     assert downloaded.get_column("exit_time").null_count() == remaining
+
+
+def test_viewer_shows_customer_types(tmp_path, offline_page):
+    result = job_shop().run(
+        duration=20,
+        drain=True,
+    )
+    viewer = tmp_path / "viewer.html"
+    result.viewer(viewer)
+    page = offline_page(viewer)
+    page.wait_for_function("window.flowsimReady !== undefined")
+    page.evaluate("window.flowsimReady")
+    headers = page.locator("#customers thead th").all_text_contents()
+    assert headers[:3] == ["Customer ID", "Source", "Type"]
+    types = page.locator("#customers tbody tr td:nth-child(3)").all_text_contents()
+    assert types == ["A", "B"]
+    page.fill("#customer-choice", "2")
+    page.click("#show-customer")
+    assert (
+        "Customer 2 (type B) arrived" in page.locator("#customer-details").inner_text()
+    )
 
 
 def test_empty_run_downloads_use_export_columns(tmp_path, offline_page):
