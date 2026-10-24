@@ -11,6 +11,7 @@
     main { max-width: 1200px; margin: auto; padding: 28px; }
     h1 { margin: 0 0 8px; font-size: 30px; }
     h2 { margin: 0 0 10px; font-size: 20px; }
+    h3 { margin: 18px 0 6px; font-size: 16px; }
     p { line-height: 1.5; margin: 8px 0 16px; }
     .muted { color: #536575; }
     .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 24px 0; }
@@ -23,6 +24,7 @@
     button:hover { background: #edf3f7; }
     label { font-size: 14px; }
     .chart { width: 100%; min-height: 350px; }
+    #utilization { min-height: 0; }
     .table-wrap { overflow-x: auto; }
     table { border-collapse: collapse; width: 100%; font-size: 14px; }
     th, td { padding: 10px 12px; border-bottom: 1px solid #e4eaef; text-align: right; white-space: nowrap; }
@@ -56,12 +58,26 @@
     <p class="muted">Values are recorded after each review's order. Orders received are consumer demand at the first stage and the downstream stage's orders elsewhere.</p>
     <div class="chart" id="inventory"></div>
   </section>
+  <section id="production-section" hidden>
+    <h2>Production stations</h2>
+    <p class="muted" id="production-details"></p>
+    <div class="table-wrap"><table id="stations"></table></div>
+    <div class="toolbar">
+      <label for="station-choice">Explore a station</label>
+      <select id="station-choice"></select>
+    </div>
+    <h3>Jobs waiting and servers occupied</h3>
+    <div class="chart" id="queues"></div>
+    <h3>Occupied server capacity after warm-up</h3>
+    <div class="chart" id="utilization"></div>
+  </section>
   <section>
     <h2>Raw records</h2>
     <p class="muted">The inventory records hold one row per stock point and period. A shipment with no arrival time was still in transit at the end.</p>
     <div class="toolbar">
       <button id="download-inventory">Download inventory CSV</button>
       <button id="download-shipments">Download shipments CSV</button>
+      <button id="download-jobs" hidden>Download jobs CSV</button>
     </div>
   </section>
 </main>
@@ -113,12 +129,35 @@
     ["bullwhip_ratio", "Bullwhip ratio"], ["fill_rate", "Fill rate"], ["mean_on_hand", "Mean on hand"],
     ["mean_backorders", "Mean backorders"], ["lost_units", "Lost sales"]
   ]);
+  // Production stations appear only when the top stage produces. Each job's
+  // flow time runs from its release at a review to its finish.
+  const production = result.stations.length > 0;
+  const stationChoice = document.getElementById("station-choice");
+  if (production) {
+    const top = result.chain[result.chain.length - 1];
+    document.getElementById("production-section").hidden = false;
+    document.getElementById("download-jobs").hidden = false;
+    document.getElementById("production-details").textContent =
+      top + " splits each order into jobs that pass through these stations. Jobs released after warm-up took " +
+      format(result.summary.mean_flow_time) + " " + unit + " on average from release to finish (" +
+      result.summary.cohort_completions + " finished, " + result.summary.cohort_remaining + " unfinished at the end). " +
+      "A finished job enters stock at the next review. Station measures use the same window as the stock points.";
+    table(document.getElementById("stations"), result.stations, [
+      ["station", "Station"], ["capacity", "Servers"], ["utilization", "Utilization"],
+      ["mean_queue", "Mean jobs waiting"], ["mean_wait", "Mean wait (" + unit + ")"]
+    ]);
+    result.stations.forEach(row => {
+      const option = document.createElement("option"); option.value = row.station; option.textContent = row.station; stationChoice.append(option);
+    });
+  }
   const stockChoice = document.getElementById("stock-choice");
   result.stock_points.forEach(row => {
     const option = document.createElement("option"); option.value = row.stock_point; option.textContent = row.stock_point; stockChoice.append(option);
   });
   const plotsReady = Promise.all(Object.entries(result.figures).map(([id, figure]) => {
-    delete figure.layout.width; figure.layout.autosize = true; figure.layout.height = 420;
+    // The utilization chart keeps the height that fits its station count.
+    delete figure.layout.width; figure.layout.autosize = true;
+    if (id !== "utilization") figure.layout.height = 420;
     delete figure.layout.updatemenus;
     return Plotly.newPlot(id, figure.data, figure.layout, config);
   }));
@@ -126,6 +165,10 @@
     await plotsReady;
     // Each stock-point trace carries its name as meta, as in plots.station_menu.
     Plotly.restyle("inventory", {visible: result.figures.inventory.data.map(trace => trace.meta === stockChoice.value)});
+  });
+  stationChoice.addEventListener("change", async () => {
+    await plotsReady;
+    Plotly.restyle("queues", {visible: result.figures.queues.data.map(trace => trace.meta === stationChoice.value)});
   });
   function download(name, rows, keys) {
     const quote = value => value === null || value === undefined ? "" : '"' + String(value).replaceAll('"', '""') + '"';
@@ -136,6 +179,7 @@
   }
   document.getElementById("download-inventory").addEventListener("click", () => download("inventory.csv", result.inventory, result.columns.inventory));
   document.getElementById("download-shipments").addEventListener("click", () => download("shipments.csv", result.shipments, result.columns.shipments));
+  document.getElementById("download-jobs").addEventListener("click", () => download("jobs.csv", result.jobs, result.columns.jobs));
   window.flowsimReady = plotsReady;
 </script>
 </body>

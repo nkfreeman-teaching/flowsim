@@ -709,8 +709,10 @@ the production lead time without the wait for the next review. `quantity` is
 empty for customers from sources. The station, visit, activity, and summary
 tables describe the production stations as they describe a service network,
 and `inventory` reports what each review receives. The factory receives no
-shipments, so `shipments` lists only shipments between stages, and the supply
-viewer shows the stock points without the stations.
+shipments, so `shipments` lists only shipments between stages. The supply
+viewer adds a production section with each station's utilization, mean queue,
+and mean wait, a chart of jobs waiting at a chosen station, the mean job lead
+time, and a download of the jobs table.
 
 ## Measurement rules
 

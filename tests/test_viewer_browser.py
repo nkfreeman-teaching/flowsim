@@ -3,7 +3,7 @@
 import polars as pl
 import pytest
 
-from flowsim import Model, compare
+from flowsim import Model, compare, moving_average, order_up_to
 from tests.models import (
     beer_chain,
     combined_line,
@@ -237,6 +237,8 @@ def test_supply_viewer_switches_stock_points_and_downloads_records(
     page.wait_for_function("window.flowsimReady !== undefined")
     page.evaluate("window.flowsimReady")
     assert page.locator(".js-plotly-plot").count() == 2
+    assert not page.locator("#production-section").is_visible()
+    assert not page.locator("#download-jobs").is_visible()
     assert page.locator("#stock-points tbody tr").count() == 4
     assert page.locator("#stock-choice option").all_text_contents() == [
         "Retailer",
@@ -268,3 +270,72 @@ def test_supply_viewer_switches_stock_points_and_downloads_records(
         )
         assert downloaded.height == getattr(result, name).height
         assert downloaded.columns == getattr(result, name).columns
+
+
+def test_supply_viewer_shows_production_stations(tmp_path, offline_page):
+    # The factory orders 50 each week in jobs of 16, 16, 16, and 2, and every
+    # job is cut and then packed.
+    model = Model(time_unit="weeks")
+    consumers = model.demand(
+        name="Consumers",
+        per_period=50,
+    )
+    factory = model.stock_point(
+        name="Factory",
+        initial=100,
+        lead_time=None,
+        batch_size=16,
+        shortage="backorder",
+        policy=order_up_to(
+            forecast=moving_average(window=1),
+            safety_factor=0,
+            cover=2,
+        ),
+        forecast_from="orders",
+    )
+    cut = model.station(
+        name="Cut",
+        capacity=1,
+        service_time=1 / 32,
+    )
+    pack = model.station(
+        name="Pack",
+        capacity=1,
+        service_time=1 / 64,
+    )
+    model.route([factory, cut, pack, factory])
+    model.supply(
+        [consumers, factory],
+        period=1,
+    )
+    result = model.run(duration=4)
+    viewer = tmp_path / "production.html"
+    result.viewer(viewer)
+    page = offline_page(viewer)
+    page.wait_for_function("window.flowsimReady !== undefined")
+    page.evaluate("window.flowsimReady")
+    assert page.locator(".js-plotly-plot").count() == 4
+    assert page.locator("#production-section").is_visible()
+    assert page.locator("#stations tbody tr").count() == 2
+    summary = result.summary.row(0, named=True)
+    details = page.locator("#production-details").inner_text()
+    assert f"{summary['cohort_completions']} finished" in details
+    assert page.locator("#station-choice option").all_text_contents() == [
+        "Cut",
+        "Pack",
+    ]
+    page.select_option("#station-choice", "Pack")
+    page.wait_for_function("document.getElementById('queues').data[2].visible === true")
+    assert page.evaluate(
+        "document.getElementById('queues').data.map(trace => trace.visible)"
+    ) == [False, False, True, True]
+    with page.expect_download() as download_info:
+        page.click("#download-jobs")
+    path = tmp_path / "jobs.csv"
+    download_info.value.save_as(path)
+    jobs = pl.read_csv(
+        source=path,
+        schema_overrides=result.customers.schema,
+    )
+    assert jobs.columns == result.customers.columns
+    assert jobs.get_column("quantity").to_list() == [16, 16, 16, 2] * 4

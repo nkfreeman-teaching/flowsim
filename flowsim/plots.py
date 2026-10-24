@@ -587,20 +587,35 @@ def inventory_plot(result: Results) -> go.Figure:
 
 
 def supply_viewer_html(result: Results) -> str:
+    figures = {
+        "orders": json.loads(result.orders_plot().to_json()),
+        "inventory": json.loads(result.inventory_plot().to_json()),
+    }
+    # A top stage that produces adds its stations, whose customers are jobs.
+    if result.capacities:
+        queues = result.queue_plot()
+        queues.update_yaxes(title_text="Jobs")
+        queues.update_traces(
+            hovertemplate=f"%{{x:.2f}} {label(result.time_unit)}"
+            "<br>%{y} jobs<extra>%{fullData.name}</extra>"
+        )
+        figures["queues"] = json.loads(queues.to_json())
+        figures["utilization"] = json.loads(result.utilization_plot().to_json())
     payload = {
-        "figures": {
-            "orders": json.loads(result.orders_plot().to_json()),
-            "inventory": json.loads(result.inventory_plot().to_json()),
-        },
+        "figures": figures,
         "chain": result.supply["chain"],
         "period": result.supply["period"],
         "stock_points": result.stock_points.to_dicts(),
         "inventory": result.inventory.to_dicts(),
         "shipments": result.shipments.to_dicts(),
+        "stations": result.stations.to_dicts(),
+        "jobs": result.customers.to_dicts(),
+        "summary": result.summary.to_dicts()[0],
         # Downloads use the export column order, even for empty tables.
         "columns": {
             "inventory": result.inventory.columns,
             "shipments": result.shipments.columns,
+            "jobs": result.customers.columns,
         },
         "percent_columns": [
             name for name, metric in METRICS.items() if metric.kind == "fraction"
