@@ -573,6 +573,7 @@ class _Run:
                     "buffer": node.buffer,
                     "external_overflow": node.external_overflow,
                     "failure_clock": node.failure_clock,
+                    "priority": None if node.priority is None else dict(node.priority),
                     "failures_enabled": node.time_to_failure is not None,
                 }
                 for name, node in self.model.nodes.items()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import math
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -194,9 +195,10 @@ class _Server:
 class _Station:
     """One station's servers, waiting line, admission queue, and shifts.
 
-    The waiting line holds admitted tickets in first-come, first-served order,
-    up to the buffer. The pending queue holds tickets not yet admitted, from
-    outside arrivals and blocked upstream transfers alike, in request order.
+    The waiting line holds admitted tickets up to the buffer, first-come,
+    first-served, or by rank and then joining order at a ranked station. The
+    pending queue holds tickets not yet admitted, from outside arrivals and
+    blocked upstream transfers alike, in request order.
     Dispatch first gives waiting tickets to idle servers, then admits pending
     tickets while there is room.
     """
@@ -321,7 +323,17 @@ class _Station:
         self.run.visits.append(ticket.visit)
         customer.station = self.node.name
         customer.status = Status.WAITING
-        self.waiting.append(ticket)
+        ranks = self.node.priority
+        if ranks is None:
+            self.waiting.append(ticket)
+        else:
+            # Model.validate checks that every type reaching the station has a
+            # rank. The ticket goes after any of equal rank.
+            bisect.insort(
+                a=self.waiting,
+                x=ticket,
+                key=lambda waiting: ranks[waiting.customer.customer_type],
+            )
         ticket.admitted.succeed()
 
     def dispatch(self) -> None:

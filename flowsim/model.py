@@ -36,6 +36,9 @@ class Node:
     # A station's one duration, or a read-only mapping from customer type to
     # duration.
     service_time: Duration | Mapping[str, Duration] | None = None
+    # A station's read-only mapping from customer type to rank, where a lower
+    # rank is served first, or None for first-come, first-served.
+    priority: Mapping[str, float] | None = None
     capacity: int = 0
     first_arrival: float | None = None
     limit: int | None = None
@@ -105,6 +108,17 @@ def _service_times(times: Mapping) -> Mapping[str, Duration]:
     return MappingProxyType(durations)
 
 
+def _ranks(priority: object) -> Mapping[str, float]:
+    if not isinstance(priority, Mapping) or not priority:
+        raise ValueError("priority must map each customer type to its rank.")
+    return MappingProxyType(
+        {
+            _type_name(kind): number(rank, f"Rank of type {kind!r}")
+            for kind, rank in priority.items()
+        }
+    )
+
+
 def _route_types(types: object) -> tuple[str | None, ...]:
     """Return the rule keys for a route or branch, where None means every type."""
     if types is None:
@@ -135,7 +149,7 @@ class SupplyChain:
 
 
 class Model:
-    """A network of first-come, first-served service stations.
+    """A network of service stations, first-come, first-served unless ranked.
 
     Each customer type's routes are acyclic. Routes across types may form a
     cycle only through stations with unlimited buffers.
@@ -278,11 +292,14 @@ class Model:
         time_to_failure: Duration | None = None,
         repair_time: Duration | None = None,
         failure_clock: str | None = None,
+        priority: Mapping[str, Real] | None = None,
     ) -> Node:
         """Create servers, with optional schedules, waiting limits, and failures.
 
         service_time is one duration, or a mapping from customer type to the
-        duration for that type.
+        duration for that type. priority maps each customer type to a rank. A
+        lower rank leaves the waiting line first, and equal ranks keep the order
+        customers joined it. Service is never interrupted.
         """
         count = integer(capacity, "Station capacity")
         if isinstance(service_time, Mapping):
@@ -346,6 +363,7 @@ class Model:
                 time_to_failure=time_to_failure,
                 repair_time=repair_time,
                 failure_clock=failure_clock,
+                priority=None if priority is None else _ranks(priority),
             )
         )
 
@@ -665,7 +683,7 @@ class Model:
             self._check_types(source)
 
     def _check_types(self, source: Node) -> None:
-        """Follow each of a source's types and check service times and routes.
+        """Follow each of a source's types and check service times, ranks, and routes.
 
         Routes may be added after stations, so these checks wait for a run.
         """
@@ -688,6 +706,16 @@ class Model:
                     raise ValueError(
                         f"{name!r} has no service time for type {kind!r}, which "
                         f"can reach it from {source.name!r}."
+                    )
+                if node.priority is not None and kind is None:
+                    raise ValueError(
+                        f"{name!r} ranks customers by type, and customers from "
+                        f"{source.name!r} have no type."
+                    )
+                if node.priority is not None and kind not in node.priority:
+                    raise ValueError(
+                        f"{name!r} has no rank for type {kind!r}, which can "
+                        f"reach it from {source.name!r}."
                     )
                 rule = _rule(self._routing[name], kind)
                 if rule is None and kind is None:
