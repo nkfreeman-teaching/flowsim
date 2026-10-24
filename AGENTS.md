@@ -14,16 +14,19 @@ ordering policies in `flowsim/policies.py`, and notebook interfaces in
 - Every station runs through `_Station` in `flowsim/station.py`. Do not add a
   second customer path for plain stations.
 - At equal times, shift changes run first, then completions, transfers,
-  failures, and repairs in the order they were scheduled, then arrivals, then
-  stock-point reviews, then drain checks. `flowsim/engine.py` sets this order
-  with scheduler event priorities.
+  failures, and repairs in the order they were scheduled, then abandonments,
+  then arrivals, then stock-point reviews, then drain checks.
+  `flowsim/scheduler.py` and `flowsim/engine.py` set this order with scheduler
+  event priorities.
 - Verify timing and metrics with hand-calculated examples, not only simulator
   output.
 - Each customer type's routes remain acyclic, and routes across types may
-  cycle only through stations with unlimited buffers. Service remains
-  first-come, first-served. Schedules, finite buffers, and failures require
+  cycle only through stations with unlimited buffers. Service is first-come,
+  first-served unless a station ranks customer types, and it is never
+  preempted. Schedules, finite buffers, abandonment, and failures require
   explicit behavior arguments. Do not choose global defaults for shift
-  ending, overflow, or failure clocks without an owner decision.
+  ending, overflow, abandonment queues, or failure clocks without an owner
+  decision.
 - Library tests never import from `examples/`. Shared models live in
   `tests/models.py`, and one-off hand-calculation models may be built inline.
   Only `tests/test_examples.py` and `tests/test_readme.py` use `examples/`,

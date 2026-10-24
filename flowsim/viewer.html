@@ -96,6 +96,7 @@
         <option value="blocked">Blocked</option>
         <option value="outside">Waiting outside</option>
         <option value="rejected">Rejected</option>
+        <option value="abandoned">Abandoned</option>
       </select>
       <button id="download-customers">Download customers CSV</button>
       <button id="download-visits">Download station visits CSV</button>
@@ -154,7 +155,8 @@
     (result.drain ? "Arrivals stopped at closing, and every admitted customer was served. Overtime: " + format(summary.overtime) + " " + unit + ". " :
       "Service stopped at closing. Unfinished final flow times are unknown. ") +
     "Operating-hour counts exclude events exactly at closing. Rejected arrivals: " + summary.rejected +
-    ". Rejected customers are excluded from wait and flow averages. Outside at closing: " + summary.outside_at_close + ".";
+    ". Abandoned customers: " + summary.abandoned +
+    ". Rejected and abandoned customers are excluded from wait and flow averages. Outside at closing: " + summary.outside_at_close + ".";
   document.getElementById("metric-definition").textContent =
     "Queue averages and utilization use operating hours after warm-up. Arrival, start, and completion counts use event times in that window. Closing counts are taken before events exactly at closing. Wait averages include observed station arrivals after warm-up, including downstream arrivals after closing when service continues.";
   function table(element, rows, columns, onRow) {
@@ -226,6 +228,7 @@
       " arrived at " + format(customer.arrival_time) + " " + unit +
       ". Status: " + customer.status.replaceAll("_", " ") + ". " +
       (customer.status === "rejected" ? "The customer did not enter the service network." :
+       customer.status === "abandoned" ? "The customer left without service at " + format(customer.abandon_time) + " " + unit + "." :
        customer.exit_time === null ? "Unfinished activity is shown through the service limit." :
         "Flow time: " + format(customer.flow_time) + " " + unit + ".");
     // plots.timeline_spans computes these bars, so this only draws them.
@@ -259,7 +262,7 @@
   function customerTable() {
     const status = document.getElementById("status-choice").value;
     const rows = result.customers.filter(row => status === "all" || row.status === status)
-      .map(row => row.status === "completed" ? Object.assign({}, row, {station: "Left system"}) : row);
+      .map(row => row.status === "completed" || row.status === "abandoned" ? Object.assign({}, row, {station: "Left system"}) : row);
     const pages = Math.max(1, Math.ceil(rows.length / pageSize));
     page = Math.min(Math.max(page, 0), pages - 1);
     table(document.getElementById("customers"), rows.slice(page * pageSize, (page + 1) * pageSize), [

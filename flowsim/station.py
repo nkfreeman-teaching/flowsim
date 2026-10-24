@@ -19,7 +19,7 @@ from flowsim.results import (
     _Failure,
     _Visit,
 )
-from flowsim.scheduler import SHIFT_PRIORITY, Event
+from flowsim.scheduler import ABANDON_PRIORITY, SHIFT_PRIORITY, Event
 from flowsim.validation import sample
 
 if TYPE_CHECKING:
@@ -34,7 +34,8 @@ PHASE_STATUS = {
 }
 
 
-@dataclass
+# Tickets compare by identity, so removing one from a line removes that ticket.
+@dataclass(eq=False)
 class _Ticket:
     customer: _Customer
     admitted: Event
@@ -42,6 +43,7 @@ class _Ticket:
     external: bool
     visit: _Visit | None = None
     server: _Server | None = None
+    patience_started: bool = False
 
 
 class _Server:
@@ -200,7 +202,8 @@ class _Station:
     pending queue holds tickets not yet admitted, from outside arrivals and
     blocked upstream transfers alike, in request order.
     Dispatch first gives waiting tickets to idle servers, then admits pending
-    tickets while there is room.
+    tickets while there is room. With patience, a customer who has not started
+    service when it runs out leaves the network.
     """
 
     def __init__(self, run: _Run, node: Node, seed: np.random.SeedSequence):
@@ -290,6 +293,8 @@ class _Station:
                 self.outside += 1
                 customer.status = Status.OUTSIDE
                 customer.station = self.node.name
+                if self.node.abandon_from == "waiting_and_outside":
+                    self.start_patience(ticket)
             self.check_drain()
         self.run.observe(self.node.name)
         return ticket
@@ -302,22 +307,17 @@ class _Station:
             customer.admission_time = now
             customer.outside_wait = now - customer.arrival_time
             customer.total_wait += customer.outside_wait
-        distribution = self.node.service_time
-        label = f"Service time at {self.node.name!r}"
-        if isinstance(distribution, Mapping):
-            # Model.validate checks that every type reaching the station has one.
-            distribution = distribution[customer.customer_type]
-            label = f"Service time for type {customer.customer_type!r} at {self.node.name!r}"
         ticket.visit = _Visit(
             customer_id=customer.customer_id,
             source=customer.source,
             customer_type=customer.customer_type,
             station=self.node.name,
             arrival_time=now,
-            service_time=sample(
-                distribution=distribution,
+            service_time=self.draw(
+                distribution=self.node.service_time,
+                label="Service time",
+                customer=customer,
                 rng=self.run.streams[self.node.name].durations,
-                label=label,
             ),
         )
         self.run.visits.append(ticket.visit)
@@ -334,7 +334,60 @@ class _Station:
                 x=ticket,
                 key=lambda waiting: ranks[waiting.customer.customer_type],
             )
+        if self.node.patience is not None and not ticket.patience_started:
+            self.start_patience(ticket)
         ticket.admitted.succeed()
+
+    def draw(
+        self,
+        distribution,
+        label: str,
+        customer: _Customer,
+        rng: np.random.Generator,
+    ) -> float:
+        """Sample a station duration, looking up the customer's type in a mapping."""
+        where = f"at {self.node.name!r}"
+        if isinstance(distribution, Mapping):
+            # Model.validate checks that every type reaching the station has one.
+            distribution = distribution[customer.customer_type]
+            where = f"for type {customer.customer_type!r} {where}"
+        return sample(
+            distribution=distribution,
+            rng=rng,
+            label=f"{label} {where}",
+        )
+
+    def start_patience(self, ticket: _Ticket) -> None:
+        ticket.patience_started = True
+        delay = self.draw(
+            distribution=self.node.patience,
+            label="Patience",
+            customer=ticket.customer,
+            rng=self.run.streams[self.node.name].patience,
+        )
+        self.run.scheduler.process(self.patience(ticket, delay))
+
+    def patience(self, ticket: _Ticket, delay: float):
+        # Abandonment runs after completions and transfers at the same time,
+        # so a server that frees at this instant takes the customer first.
+        yield self.run.scheduler.timeout(
+            delay,
+            priority=ABANDON_PRIORITY,
+        )
+        if ticket.server is not None:
+            return
+        now = float(self.run.scheduler.now)
+        if ticket.visit is None:
+            # Only outside arrivals start the clock before admission.
+            self.pending.remove(ticket)
+            self.outside -= 1
+        else:
+            self.waiting.remove(ticket)
+            ticket.visit.abandon_time = now
+        ticket.customer.status = Status.ABANDONED
+        ticket.customer.abandon_time = now
+        self.run.complete_active()
+        self.dispatch()
 
     def dispatch(self) -> None:
         while True:
@@ -406,7 +459,18 @@ class _Station:
         paused = self.node.shift_end != "finish" and any(
             server.phase == Phase.PAUSED for server in self.servers
         )
-        if not future and (self.waiting or self.pending or paused):
+        # With patience, every waiting customer leaves in time, and each one
+        # who leaves frees room for a pending ticket, so only pending tickets
+        # behind an empty line wait forever. Outside arrivals that can abandon
+        # leave too.
+        leaving = self.node.patience is not None
+        held = len(self.pending)
+        if self.node.abandon_from == "waiting_and_outside":
+            held -= self.outside
+        stuck = (self.waiting and not leaving) or (
+            held and not (self.waiting and leaving)
+        )
+        if not future and (stuck or paused):
             raise RuntimeError(
                 f"Cannot drain station {self.node.name!r}. Unfinished work has no future staffing."
             )

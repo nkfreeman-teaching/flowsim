@@ -18,10 +18,12 @@ from itertools import count
 
 # Process starts and the stop of run(until=time) come before every other event
 # at the same time. FlowSim's shift changes come next, and succeeded events and
-# timeouts default to NORMAL.
+# timeouts default to NORMAL. Abandonment follows NORMAL, so a server that frees
+# at the instant a customer's patience runs out serves that customer.
 URGENT = 0
 SHIFT_PRIORITY = 1
 NORMAL = 2
+ABANDON_PRIORITY = 3
 
 
 class Event:

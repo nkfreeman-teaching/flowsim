@@ -25,6 +25,7 @@ CUSTOMER_SCHEMA = {
     "customer_type": pl.String,
     "arrival_time": pl.Float64,
     "exit_time": pl.Float64,
+    "abandon_time": pl.Float64,
     "flow_time": pl.Float64,
     "total_wait": pl.Float64,
     "total_blocked": pl.Float64,
@@ -43,6 +44,7 @@ VISIT_SCHEMA = {
     "service_start": pl.Float64,
     "service_end": pl.Float64,
     "departure_time": pl.Float64,
+    "abandon_time": pl.Float64,
     "server_id": pl.Int64,
     "blocked_time": pl.Float64,
     "wait_time": pl.Float64,
@@ -169,6 +171,7 @@ class Status(StrEnum):
     BLOCKED = "blocked"
     PAUSED = "paused"
     REJECTED = "rejected"
+    ABANDONED = "abandoned"
     COMPLETED = "completed"
 
 
@@ -195,6 +198,7 @@ class _Customer:
     customer_type: str | None = None
     arrival_time: float
     exit_time: float | None = None
+    abandon_time: float | None = None
     flow_time: float | None = None
     total_wait: float = 0.0
     total_blocked: float = 0.0
@@ -219,6 +223,7 @@ class _Visit:
     service_start: float | None = None
     service_end: float | None = None
     departure_time: float | None = None
+    abandon_time: float | None = None
     server_id: int | None = None
     blocked_time: float | None = None
     wait_time: float | None = None
@@ -392,6 +397,11 @@ METRICS = {
         label="Admissions after warm-up, before closing",
         kind="customers",
     ),
+    "abandonment_rate": Metric(
+        scope="system",
+        label="Arrivals after warm-up who abandon",
+        kind="fraction",
+    ),
     "mean_total_blocked": Metric(
         scope="system",
         label="Mean time blocked between stations",
@@ -496,7 +506,7 @@ def metric_units(metric: str, time_unit: str) -> str:
     return {
         "time": time_unit,
         "rate": f"customers per {time_unit}",
-        "fraction": "share of capacity",
+        "fraction": "share",
         "servers": "servers",
         "customers": "customers",
         "units": "units",
@@ -782,6 +792,16 @@ class Results:
         finished = cohort.filter(pl.col("status") == Status.COMPLETED)
         completed = eligible.get_column("exit_time").count()
         rejected = self.customers.height - eligible.height
+        # Abandoned customers leave without service, so they are neither
+        # completed nor remaining, and their waits stay out of the averages.
+        abandoned = eligible.get_column("abandon_time").count()
+        abandoned_at_close = eligible.filter(
+            pl.col("abandon_time") < self.duration
+        ).height
+        cohort_abandoned = cohort.get_column("abandon_time").count()
+        measurement_arrivals = self.customers.filter(
+            pl.col("arrival_time") >= self.warmup
+        ).height
         exits = self.customers.filter(
             (pl.col("exit_time") >= self.warmup) & (pl.col("exit_time") < self.duration)
         ).height
@@ -794,7 +814,7 @@ class Results:
         inside = eligible.filter(pl.col("admission_time").is_not_null())
         presence = inside.select(
             (
-                pl.col("exit_time")
+                pl.coalesce("exit_time", "abandon_time")
                 .fill_null(self.duration)
                 .clip(upper_bound=self.duration)
                 - pl.col("admission_time").clip(lower_bound=self.warmup)
@@ -812,21 +832,28 @@ class Results:
                 ],
                 "outside_at_close": [
                     eligible.filter(
-                        pl.col("admission_time").is_null()
-                        | (pl.col("admission_time") >= self.duration)
+                        (
+                            pl.col("admission_time").is_null()
+                            | (pl.col("admission_time") >= self.duration)
+                        )
+                        & (
+                            pl.col("abandon_time").is_null()
+                            | (pl.col("abandon_time") >= self.duration)
+                        )
                     ).height
                 ],
                 "rejected": [rejected],
+                "abandoned": [abandoned],
                 "completed": [completed],
-                "remaining": [eligible.height - completed],
+                "remaining": [eligible.height - completed - abandoned],
                 "completed_at_close": [completed_at_close],
-                "remaining_at_close": [eligible.height - completed_at_close],
+                "remaining_at_close": [
+                    eligible.height - completed_at_close - abandoned_at_close
+                ],
                 "after_close_completions": [completed - completed_at_close],
                 "end_time": [self.end_time],
                 "overtime": [self.end_time - self.duration],
-                "measurement_arrivals": [
-                    self.customers.filter(pl.col("arrival_time") >= self.warmup).height
-                ],
+                "measurement_arrivals": [measurement_arrivals],
                 # A rejection happens at arrival, so both counts use the event's
                 # own time in [warmup, duration), as measurement_completions does.
                 "measurement_rejected": [
@@ -834,6 +861,19 @@ class Results:
                         (pl.col("status") == Status.REJECTED)
                         & (pl.col("arrival_time") >= self.warmup)
                     ).height
+                ],
+                # Abandonments count by their own time, like completions. The
+                # rate instead follows the customers who arrived after warm-up.
+                "measurement_abandoned": [
+                    eligible.filter(
+                        (pl.col("abandon_time") >= self.warmup)
+                        & (pl.col("abandon_time") < self.duration)
+                    ).height
+                ],
+                "abandonment_rate": [
+                    cohort_abandoned / measurement_arrivals
+                    if measurement_arrivals
+                    else None
                 ],
                 "measurement_admitted": [
                     inside.filter(
@@ -844,7 +884,9 @@ class Results:
                 "cohort_arrivals": [cohort.height],
                 "measurement_completions": [exits],
                 "cohort_completions": [finished.height],
-                "cohort_remaining": [cohort.height - finished.height],
+                "cohort_remaining": [
+                    cohort.height - finished.height - cohort_abandoned
+                ],
                 "mean_flow_time": [finished.get_column("flow_time").mean()],
                 "mean_total_wait": [finished.get_column("total_wait").mean()],
                 "mean_total_blocked": [finished.get_column("total_blocked").mean()],
@@ -853,6 +895,7 @@ class Results:
                 "mean_wip": [presence / window],
             },
             schema_overrides={
+                "abandonment_rate": pl.Float64,
                 "mean_flow_time": pl.Float64,
                 "mean_total_wait": pl.Float64,
                 "mean_total_blocked": pl.Float64,

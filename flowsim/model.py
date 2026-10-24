@@ -39,6 +39,10 @@ class Node:
     # A station's read-only mapping from customer type to rank, where a lower
     # rank is served first, or None for first-come, first-served.
     priority: Mapping[str, float] | None = None
+    # A station's patience, as one duration or a read-only mapping from customer
+    # type to duration, and the queues a customer may leave when it runs out.
+    patience: Duration | Mapping[str, Duration] | None = None
+    abandon_from: str | None = None
     capacity: int = 0
     first_arrival: float | None = None
     limit: int | None = None
@@ -96,14 +100,15 @@ def _type_mix(types: object) -> Mapping[str, float]:
     return MappingProxyType(probabilities)
 
 
-def _service_times(times: Mapping) -> Mapping[str, Duration]:
+def _typed_durations(times: Mapping, label: str) -> Mapping[str, Duration]:
+    """Check a mapping from customer type to duration, labeled like "Service time"."""
     if not times:
-        raise ValueError("A service time mapping needs at least one customer type.")
+        raise ValueError(f"A {label.lower()} mapping needs at least one customer type.")
     durations = {}
     for kind, duration in times.items():
         name = _type_name(kind)
         if not callable(duration):
-            number(duration, f"Service time for type {name!r}")
+            number(duration, f"{label} for type {name!r}")
         durations[name] = duration
     return MappingProxyType(durations)
 
@@ -293,6 +298,8 @@ class Model:
         repair_time: Duration | None = None,
         failure_clock: str | None = None,
         priority: Mapping[str, Real] | None = None,
+        patience: Duration | Mapping[str, Duration] | None = None,
+        abandon_from: str | None = None,
     ) -> Node:
         """Create servers, with optional schedules, waiting limits, and failures.
 
@@ -300,10 +307,17 @@ class Model:
         duration for that type. priority maps each customer type to a rank. A
         lower rank leaves the waiting line first, and equal ranks keep the order
         customers joined it. Service is never interrupted.
+
+        patience is one duration, or a mapping from customer type to duration,
+        after which a customer who has not started service leaves the network.
+        abandon_from='waiting' starts the clock when the customer enters the
+        waiting line. 'waiting_and_outside' also starts it when an outside
+        arrival joins the queue outside a full buffer, and the clock keeps
+        running after admission.
         """
         count = integer(capacity, "Station capacity")
         if isinstance(service_time, Mapping):
-            service_time = _service_times(service_time)
+            service_time = _typed_durations(service_time, "Service time")
         elif not callable(service_time):
             number(service_time, "Service time")
         staff = None
@@ -350,6 +364,22 @@ class Model:
                 number(repair_time, "Repair time")
         elif failure_clock is not None:
             raise ValueError("failure_clock requires time_to_failure and repair_time.")
+        if patience is not None:
+            if abandon_from not in {"waiting", "waiting_and_outside"}:
+                raise ValueError(
+                    "Patience requires abandon_from='waiting' or 'waiting_and_outside'."
+                )
+            if abandon_from == "waiting_and_outside" and external_overflow != "wait":
+                raise ValueError(
+                    "abandon_from='waiting_and_outside' requires a finite buffer "
+                    "with external_overflow='wait'."
+                )
+            if isinstance(patience, Mapping):
+                patience = _typed_durations(patience, "Patience")
+            elif not callable(patience):
+                number(patience, "Patience")
+        elif abandon_from is not None:
+            raise ValueError("abandon_from requires patience.")
         return self._add(
             Node(
                 name=name,
@@ -364,6 +394,8 @@ class Model:
                 repair_time=repair_time,
                 failure_clock=failure_clock,
                 priority=None if priority is None else _ranks(priority),
+                patience=patience,
+                abandon_from=abandon_from,
             )
         )
 
@@ -683,7 +715,7 @@ class Model:
             self._check_types(source)
 
     def _check_types(self, source: Node) -> None:
-        """Follow each of a source's types and check service times, ranks, and routes.
+        """Follow each of a source's types and check durations, ranks, and routes.
 
         Routes may be added after stations, so these checks wait for a run.
         """
@@ -706,6 +738,16 @@ class Model:
                     raise ValueError(
                         f"{name!r} has no service time for type {kind!r}, which "
                         f"can reach it from {source.name!r}."
+                    )
+                if isinstance(node.patience, Mapping) and kind is None:
+                    raise ValueError(
+                        f"{name!r} sets patience by customer type, and customers "
+                        f"from {source.name!r} have no type."
+                    )
+                if isinstance(node.patience, Mapping) and kind not in node.patience:
+                    raise ValueError(
+                        f"{name!r} has no patience for type {kind!r}, which can "
+                        f"reach it from {source.name!r}."
                     )
                 if node.priority is not None and kind is None:
                     raise ValueError(

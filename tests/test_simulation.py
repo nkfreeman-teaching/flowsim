@@ -898,6 +898,7 @@ def test_record_tables_read_columns_by_name():
         "service_start": 3.0,
         "service_end": 5.5,
         "departure_time": 6.0,
+        "abandon_time": None,
         "server_id": 2,
         "blocked_time": 0.5,
         "wait_time": 2.0,
@@ -1062,6 +1063,7 @@ def test_every_customer_has_a_status_from_the_arrival_instant():
         "blocked",
         "paused",
         "rejected",
+        "abandoned",
         "completed",
     ]
 

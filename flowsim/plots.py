@@ -362,17 +362,18 @@ def resource_plot(result: Results) -> go.Figure:
 def timeline_spans(result: Results) -> pl.DataFrame:
     """Return every customer's timeline bars, grouped in TIMELINE_COLORS order.
 
-    Waiting runs from station arrival to service start, and the server activity
-    rows give service, paused, and blocked time. A customer who waited outside a
-    full buffer gets an "Outside" bar until admission. An open end runs to the
-    end time. Zero-length service writes no activity row, so it draws no bar.
+    Waiting runs from station arrival to service start or abandonment, and the
+    server activity rows give service, paused, and blocked time. A customer who
+    waited outside a full buffer gets an "Outside" bar until admission or
+    abandonment. An open end runs to the end time. Zero-length service writes no
+    activity row, so it draws no bar.
     """
     waiting = result.visits.select(
         "customer_id",
         pl.lit("Waiting").alias("activity"),
         "station",
         pl.col("arrival_time").alias("start"),
-        pl.col("service_start").alias("end"),
+        pl.coalesce("service_start", "abandon_time").alias("end"),
     )
     activities = [
         result.activities.filter(pl.col("state") == state).select(
@@ -391,12 +392,17 @@ def timeline_spans(result: Results) -> pl.DataFrame:
     outside = result.customers.filter(
         (pl.col("status") == Status.OUTSIDE)
         | (pl.col("outside_wait").is_not_null() & (pl.col("outside_wait") != 0))
+        | (
+            (pl.col("status") == Status.ABANDONED)
+            & pl.col("admission_time").is_null()
+            & (pl.col("abandon_time") > pl.col("arrival_time"))
+        )
     ).select(
         "customer_id",
         pl.lit("Outside").alias("activity"),
         pl.lit("Outside").alias("station"),
         pl.col("arrival_time").alias("start"),
-        pl.col("admission_time").alias("end"),
+        pl.coalesce("admission_time", "abandon_time").alias("end"),
     )
     return pl.concat([waiting, *activities, outside]).with_columns(
         pl.col("end").fill_null(result.end_time),

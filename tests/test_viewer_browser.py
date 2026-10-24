@@ -92,6 +92,42 @@ def test_viewer_shows_customer_types(tmp_path, offline_page):
     )
 
 
+def test_viewer_shows_abandoned_customers(tmp_path, offline_page):
+    # Arrivals at 0, 1, and 2 need 5 each, and customer 2 leaves at 1 + 3 = 4.
+    model = Model()
+    callers = model.source(
+        name="Callers",
+        interarrival=1,
+        first_arrival=0,
+        limit=3,
+    )
+    desk = model.station(
+        name="Desk",
+        capacity=1,
+        service_time=5,
+        patience=3,
+        abandon_from="waiting",
+    )
+    model.route([callers, desk, model.exit])
+    result = model.run(
+        duration=20,
+        drain=True,
+    )
+    viewer = tmp_path / "viewer.html"
+    result.viewer(viewer)
+    page = offline_page(viewer)
+    page.wait_for_function("window.flowsimReady !== undefined")
+    page.evaluate("window.flowsimReady")
+    assert "Abandoned customers: 1" in page.locator("#notice").inner_text()
+    page.select_option("#status-choice", "abandoned")
+    assert "1 matching customers" in page.locator("#page-details").inner_text()
+    cells = page.locator("#customers tbody tr td").all_text_contents()
+    assert cells[-2:] == ["abandoned", "Left system"]
+    page.fill("#customer-choice", "2")
+    page.click("#show-customer")
+    assert "left without service at 4" in page.locator("#customer-details").inner_text()
+
+
 def test_empty_run_downloads_use_export_columns(tmp_path, offline_page):
     model = Model()
     arrivals = model.source(

@@ -135,11 +135,11 @@ unknown outcome with zero.
 
 | File | Contents |
 | --- | --- |
-| `customers.csv` | Each customer's source, type, system arrival, admission, exit, flow time, observed total wait and blocking, final status, and current station. |
-| `visits.csv` | Each station visit's customer type, arrival, service start, processing completion, departure, server identity, waiting, blocking, and sampled service requirement. |
+| `customers.csv` | Each customer's source, type, system arrival, admission, exit or abandonment, flow time, observed total wait and blocking, final status, and current station. |
+| `visits.csv` | Each station visit's customer type, arrival, service start, processing completion, departure or abandonment, server identity, waiting, blocking, and sampled service requirement. |
 | `states.csv` | Station queue and server counts after each time with a state change, plus closing and the end of service. |
 | `stations.csv` | Station counts, wait summaries, time-weighted queue lengths, and utilization. |
-| `summary.csv` | System counts at closing and after service, overtime, completed flow-time averages, throughput, and time-average work in process. |
+| `summary.csv` | System counts at closing and after service, rejections and abandonments, overtime, completed flow-time averages, throughput, and time-average work in process. |
 | `activities.csv` | Each customer's processing, paused, and blocked intervals by server. Intervals of zero length are omitted. |
 | `failures.csv` | Per-server failure times, sampled lifetimes, repair requirements, and observed repair ends. The file has only a header when no station fails. |
 | `metadata.json` | The FlowSim version, run settings (time unit, duration, warm-up, seed, drain), end time, capacities, per-node settings, routes, and text definitions of the measurement windows and cohorts. |
@@ -147,11 +147,13 @@ unknown outcome with zero.
 ## Model features
 
 The examples above use one source, a straight route, and stations with a fixed
-number of servers. Branches, customer types, schedules, finite buffers, and
-failures extend that model. Schedules, buffers, and failures each require an explicit behavior
-argument, since the package does not choose a default for how a shift ends,
-where overflow goes, or when a failure clock runs. Runnable versions of these
-models are in `examples/models.py` and `examples/extensions.py`.
+number of servers. Branches, customer types, schedules, finite buffers,
+priorities, abandonment, and failures extend that model. Schedules, buffers,
+abandonment, and failures each require an explicit behavior argument, since the
+package does not choose a default for how a shift ends, where overflow goes,
+which queues a customer may leave, or when a failure clock runs. Runnable
+versions of these models are in `examples/models.py` and
+`examples/extensions.py`.
 
 To inspect a model, `model.nodes` maps each name to its node in definition
 order, and `model.graph` returns a frozen NetworkX copy of the routes with each
@@ -219,8 +221,9 @@ finite buffers could deadlock, with each blocked server waiting for room at the
 next station on the cycle, so a station on a cycle across types must have an
 unlimited buffer, and `route` raises an error otherwise. Routes may be added
 after their stations, so `run` checks that every type that can reach a station
-has a service time and a route there, and the error names the station, the
-type, and the source.
+has a service time, a route, and any rank or patience the station sets by type
+(see Priorities and abandonment), and the error names the station, the type,
+and the source.
 
 ```python
 import polars as pl
@@ -371,8 +374,10 @@ outside queue until admission is possible, and that queue does not use the
 inside buffer. Outside arrivals and blocked transfers from upstream stations
 wait in one admission line, and the station admits them in the order they asked
 to enter. `arrivals` counts attempts, with
-`arrivals = completed + remaining + rejected`. `admitted` counts successful
-admissions to the network, and `admitted_at_close` excludes later admissions.
+`arrivals = completed + remaining + rejected + abandoned`, where `abandoned` is
+zero without patience (see Priorities and abandonment). `admitted` counts
+successful admissions to the network, and `admitted_at_close` excludes later
+admissions.
 `measurement_rejected` and `measurement_admitted` count only rejections and
 admissions whose times fall in the measurement window `[warmup, duration)`, so
 an outside customer who arrived before warm-up and entered after it counts in
@@ -382,6 +387,81 @@ an outside customer who arrived before warm-up and entered after it counts in
 rejections. Outside waiting adds to `total_wait`, blocking is reported
 separately in `total_blocked`, and work in process begins at admission. A small
 mean wait does not establish good service when many customers are rejected.
+
+### Priorities and abandonment
+
+A priority ranks customer types at one station (e.g., critical patients ahead
+of routine ones). `priority={"Critical": 1, "Routine": 2}` maps each type to a
+rank, a lower rank leaves the waiting line first, and customers of equal rank
+keep the order in which they joined it. Service is not preemptive, so a server
+finishes its current customer before it takes a higher-ranked one. The rank
+orders only the inside waiting line, and the outside queue of a finite buffer
+keeps request order, because a blocked upstream server holds its job until the
+station admits it. Every type that can reach a ranked station must have a rank.
+
+Abandonment refers to a waiting customer leaving before service (e.g., a caller
+who hangs up or a patient who leaves without being seen). `patience` is a
+duration, or a mapping from customer type to duration, drawn from its own
+random stream at the station, and `abandon_from` is required with it.
+`abandon_from="waiting"` starts the clock when the customer enters the waiting
+line. `abandon_from="waiting_and_outside"` requires a finite buffer with
+`external_overflow="wait"`, starts the clock when an outside arrival joins the
+outside queue, and keeps it running after admission. A blocked transfer from an
+upstream station starts its clock only when it enters the waiting line, since
+its upstream server still holds it. A customer whose patience ends before
+service starts leaves the network with status `abandoned`, and its
+`abandon_time` appears in `customers` and, if it entered the waiting line, in
+`visits`.
+
+```python
+import polars as pl
+
+from flowsim import Model
+
+model = Model()
+patients = model.source(
+    name="Patients",
+    interarrival=lambda rng: rng.exponential(scale=6),
+    types={"Critical": 0.2, "Routine": 0.8},
+)
+doctor = model.station(
+    name="Doctor",
+    capacity=1,
+    service_time=lambda rng: rng.exponential(scale=5),
+    priority={"Critical": 1, "Routine": 2},
+    patience={
+        "Critical": 240,
+        "Routine": lambda rng: rng.exponential(scale=30),
+    },
+    abandon_from="waiting",
+)
+model.route([patients, doctor, model.exit])
+results = model.run(
+    duration=480,
+    drain=True,
+)
+print(
+    results.summary.select(
+        "arrivals",
+        "completed",
+        "abandoned",
+        "abandonment_rate",
+    )
+)
+waits = results.visits.group_by("customer_type").agg(pl.col("wait_time").mean())
+```
+
+At equal times, service wins, so a server that frees at the instant a
+customer's patience ends serves that customer (see Measurement rules).
+Abandoned customers stay out of wait and flow averages, as rejected arrivals
+do, and `arrivals = completed + remaining + rejected + abandoned`. `abandoned`
+counts every abandonment, `measurement_abandoned` counts those whose times fall
+in `[warmup, duration)`, and `abandonment_rate` is the share of arrivals at or
+after warm-up who abandon. With `drain=False`, a customer still waiting at the
+end has not abandoned, so the rate can understate abandonment. A drained run
+finishes once the remaining waiting customers abandon, even at a station with
+no future staffing. Thus, as with rejections, a short mean wait does not
+establish good service when the abandonment rate is high.
 
 ### Failures and repair
 
@@ -538,9 +618,10 @@ closing with a dashed line.
 
 Several events can occur at the same instant. FlowSim processes shift changes
 first, then service completions, transfers, failures, and repairs in the order
-they were scheduled, then new arrivals, then stock-point reviews, and drain
-checks last. Thus, a server that finishes a job at minute 10 is free for a
-customer who arrives at minute 10, and the state trace keeps the final state at
+they were scheduled, then abandonments, then new arrivals, then stock-point
+reviews, and drain checks last. Thus, a server that finishes a job at minute 10
+is free for a customer who arrives at minute 10 and for a waiting customer
+whose patience ends at minute 10, and the state trace keeps the final state at
 each time.
 
 Queue averages, utilization, throughput, and event counts use the operating
@@ -691,6 +772,7 @@ names one.
 | `admitted` | System | Admitted customers over the whole run, including admissions after closing |
 | `measurement_rejected` | System | Rejected arrivals in `[warmup, duration)` |
 | `measurement_admitted` | System | Admissions in `[warmup, duration)` |
+| `abandonment_rate` | System | Share of arrivals in `[warmup, duration)` who abandon before service |
 | `mean_total_blocked` | System | Mean time blocked between stations |
 | `mean_outside_wait` | System | Mean waiting time outside the first station |
 | `mean_wait` | Station | Mean station waiting time |
@@ -713,8 +795,9 @@ names one.
 The offline comparison viewer shows scenario means and paired differences for
 one metric (e.g., `viewer(metric="overtime")`). Comparison exports contain
 per-replication system and station metrics (and stock-point metrics for supply
-chains), scenario intervals, paired differences, and metadata. Raw customer records remain in
-`comparison.experiments[scenario].runs`, and each run has its own `export()`.
+chains), scenario intervals, paired differences, and metadata. Raw customer
+records remain in `comparison.experiments[scenario].runs`, and each run has its
+own `export()`.
 The intervals are nominal for each reported metric or contrast, i.e., they are
 not simultaneous confidence bounds across every scenario and metric.
 
@@ -848,10 +931,12 @@ path that does not exist fails the tests.
 
 FlowSim supports routes that are acyclic for each customer type (routes across
 types may cycle through stations with unlimited buffers), first-come,
-first-served service, identical servers within each station, scheduled demand and staffing, finite buffers,
-blocking after service, and independent failures with resumable work. Every
-station has its own server pool. Priorities, reneging, batches, workers shared
-across stations, shared repair crews, and rework loops are not implemented.
+first-served service unless a station ranks customer types, abandonment after a
+patience time, identical servers within each station, scheduled demand and
+staffing, finite buffers, blocking after service, and independent failures with
+resumable work. Every station has its own server pool. Preemption, balking
+(i.e., refusing to join a long line), batches, workers shared across stations,
+shared repair crews, and rework loops are not implemented.
 Supply chains are linear, review every stage on one period, order with an
 order-up-to policy and a moving-average forecast, and cannot share a model with
 a service network, so a factory's lead time stands in for its production.

@@ -34,12 +34,13 @@ if TYPE_CHECKING:
 # The scheduler processes events at equal times by priority, then in the order
 # they were queued. Shift changes come first (the scheduler's SHIFT_PRIORITY, 1).
 # Completions, transfers, failures, and repairs use NORMAL (2) and run in the
-# order they were scheduled. Arrivals wait until those events settle. Stock-point
-# reviews come after arrivals, and drain checks run last, after every other
-# event at the same time.
-ARRIVAL_PRIORITY = 3
-REVIEW_PRIORITY = 4
-SETTLED_PRIORITY = 5
+# order they were scheduled. Abandonment (the scheduler's ABANDON_PRIORITY, 3)
+# waits until those events settle, and arrivals come next. Stock-point reviews
+# come after arrivals, and drain checks run last, after every other event at the
+# same time.
+ARRIVAL_PRIORITY = 4
+REVIEW_PRIORITY = 5
+SETTLED_PRIORITY = 6
 
 # Each node's seeds use its name's CRC-32 and one of these purposes as the spawn
 # key. Server failure and repair seeds are spawned from the SERVER_STREAMS seed.
@@ -47,6 +48,7 @@ DURATION_STREAM = 0
 ROUTING_STREAM = 1
 SERVER_STREAMS = 2
 TYPE_STREAM = 3
+PATIENCE_STREAM = 4
 
 
 @dataclass(
@@ -54,15 +56,17 @@ TYPE_STREAM = 3
     slots=True,
 )
 class _Streams:
-    """A node's generators for its durations, routing choices, and types.
+    """A node's generators for its durations, routing choices, types, and patience.
 
     A source draws interarrival times from durations and its customers' types
-    from types, and a station draws service times from durations.
+    from types. A station draws service times from durations and each
+    customer's patience from patience.
     """
 
     durations: np.random.Generator
     routing: np.random.Generator
     types: np.random.Generator
+    patience: np.random.Generator
 
 
 @dataclass(
@@ -159,6 +163,7 @@ class _Run:
                 durations=np.random.default_rng(node_seed(name, DURATION_STREAM)),
                 routing=np.random.default_rng(node_seed(name, ROUTING_STREAM)),
                 types=np.random.default_rng(node_seed(name, TYPE_STREAM)),
+                patience=np.random.default_rng(node_seed(name, PATIENCE_STREAM)),
             )
         # Routes are fixed for the run, so each node's choices are built once,
         # keyed by customer type, where None is a route for every type.
@@ -574,6 +579,7 @@ class _Run:
                     "external_overflow": node.external_overflow,
                     "failure_clock": node.failure_clock,
                     "priority": None if node.priority is None else dict(node.priority),
+                    "abandon_from": node.abandon_from,
                     "failures_enabled": node.time_to_failure is not None,
                 }
                 for name, node in self.model.nodes.items()
