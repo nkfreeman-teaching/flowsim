@@ -13,14 +13,162 @@ a top stage that produces its orders at stations (see Inventory and ordering).
 
 ## Getting started
 
-FlowSim uses [Pixi](https://pixi.sh) to manage its environment. Clone the
-repository and install the locked environment from its root:
+These steps set up FlowSim on Windows or macOS and reproduce the core video and
+the service day video. Every command runs in a terminal (PowerShell on Windows,
+Terminal on macOS), and one command works on both systems unless a step shows a
+separate command for each. The four FlowSim videos are in one
+[YouTube playlist](https://www.youtube.com/playlist?list=PLGOCHatbz0gA).
+
+### 1. Check for Pixi
+
+FlowSim uses [Pixi](https://pixi.sh) to install Python and every package the
+project needs into the project folder. OM 522 students installed Pixi in the
+Technology Foundations meeting. Open a terminal and run
 
 ```bash
-git clone https://github.com/nkfreeman-teaching/flowsim
-cd flowsim
+pixi --version
+```
+
+A version number (e.g., `pixi 0.83.0`) means Pixi is ready. If the terminal
+reports that `pixi` is not found or not recognized, install it with the command
+for the system, then close the terminal and open a new one, since the installer
+updates the `PATH` (the list of folders a terminal searches for programs) only
+for terminals opened afterward.
+
+```bash
+# macOS (Terminal)
+curl -fsSL https://pixi.sh/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -c "irm -useb https://pixi.sh/install.ps1 | iex"
+```
+
+On a Windows machine that blocks scripts, `winget install prefix-dev.pixi`
+installs the same program.
+
+### 2. Download FlowSim
+
+Open <https://github.com/nkfreeman-teaching/flowsim> in a browser, click the
+green **Code** button, and choose **Download ZIP**. The browser saves
+`flowsim-main.zip` in the Downloads folder.
+
+- **macOS.** Safari extracts the ZIP automatically and leaves a `flowsim-main`
+  folder in Downloads. With another browser, double-click `flowsim-main.zip` in
+  Finder to extract it.
+- **Windows.** Right-click `flowsim-main.zip` in File Explorer, choose
+  **Extract All**, and accept the suggested destination. Windows places a second
+  `flowsim-main` folder inside the first, and the inner folder is the project.
+
+The project folder is the one that holds `pixi.toml`, `README.md`, and the
+folders `examples` and `flowsim` (Windows may hide the `.toml` ending and show
+`pixi`).
+
+### 3. Move the project to OM522/flowsim
+
+These steps keep the project at `OM522/flowsim` in the home folder
+(`C:\Users\<name>` on Windows, `/Users/<name>` on macOS). Neither OneDrive nor
+iCloud syncs the home folder itself, which matters because a synced folder can
+lock or partly upload the thousands of files Pixi installs. Create the `OM522`
+folder from the terminal.
+
+```bash
+mkdir ~/OM522
+```
+
+Then move the project folder from step 2 into `OM522` and rename it `flowsim`.
+
+- **macOS.** In Finder, choose **Go > Home** (Shift-Command-H), open `OM522`,
+  and drag the `flowsim-main` folder from Downloads into it. Select the folder,
+  press Return, and type `flowsim`.
+- **Windows.** In File Explorer, type `%USERPROFILE%\OM522` in the address bar
+  and press Enter. Drag the inner `flowsim-main` folder from Downloads into it,
+  then right-click the folder, choose **Rename**, and type `flowsim`.
+
+Check the result from the terminal.
+
+```bash
+cd ~/OM522/flowsim
+ls pixi.toml
+```
+
+The second command prints `pixi.toml`. An error means the moved folder is not
+the project folder. On Windows it is usually the outer `flowsim-main` folder, so
+move the inner folder instead.
+
+### 4. Install the environment
+
+From `~/OM522/flowsim`, run
+
+```bash
 pixi install
 ```
+
+The first run downloads Python and every package listed in the lock file
+(`pixi.lock`), so it needs an internet connection, and later runs reuse those
+downloads. Every `pixi run` command below starts from this folder, so begin each
+new terminal session with `cd ~/OM522/flowsim`.
+
+### 5. Reproduce the core video
+
+The core video is [FlowSim: the core workflow](https://youtu.be/lRh8qnjg4lo).
+
+```bash
+pixi run demo
+```
+
+The first pair of tables, under `deterministic`, describes the three-customer
+queue that the core video times by hand. Its `Service` row shows a mean wait of
+1.0 minute, a mean queue of 0.428571 (i.e., 3/7), and a utilization of 0.857143
+(i.e., 6/7), which are the values the video derives in "Checking the timing by
+hand" and reads back in "Reading the result tables". The run also writes the
+offline viewer page and the CSV export that the video opens in "Viewing and
+exporting results". Open the viewer with the command for the system.
+
+```bash
+# macOS
+open output/deterministic/viewer.html
+```
+
+```powershell
+# Windows
+start output\deterministic\viewer.html
+```
+
+### 6. Reproduce the service day video
+
+The service day video is
+[FlowSim: staffing a service day](https://youtu.be/z-lPhexe7ZY).
+
+```bash
+pixi run exercise
+```
+
+The `Staffing targets` table repeats the service day video's comparison, in
+which one server averages 78.6 minutes of total wait, two servers average 3.2,
+and three average 1.1. Its `days_finished_on_time` column shows 19 of 20 days
+for two servers, and the last line names two servers as the lowest staffing that
+meets both targets, which is the video's decision. The same three means appear
+in the core video's "Comparing scenarios" part. The run also writes the pages
+the service day video shows, i.e., day 1 with one server
+(`output/service-day/one-server/viewer.html`), day 1 with two servers
+(`output/service-day/two-servers/viewer.html`), and the overtime comparison
+(`output/service-day/overtime-comparison.html`). Open each with `open` or
+`start` as in step 5.
+
+### Updating FlowSim
+
+To update FlowSim, download a new ZIP, replace the `flowsim` folder as in steps
+2 and 3, and run `pixi install` again. The tasks regenerate everything under
+`output/`. Readers who use git can instead clone the repository into the same
+place and update it later with `git pull`.
+
+```bash
+git clone https://github.com/nkfreeman-teaching/flowsim ~/OM522/flowsim
+```
+
+### Tasks
 
 The repository defines these tasks:
 
@@ -30,6 +178,7 @@ The repository defines these tasks:
 | `pixi run exercise` | Runs the worked staffing exercise (see Classroom exercise) and writes reports under `output/service-day/`. |
 | `pixi run extensions` | Runs peak demand with a lunch break, a buffered production line, a machine with repairs, and a combined line from `examples/extensions.py`, writing them under `output/extensions/`. |
 | `pixi run operations` | Runs the saturated machining line and the truck cross-dock in `examples/operations.py`, comparing buffer plans and dock capacity across 20 replications, and writes them under `output/operations/` (see Operations examples). |
+| `pixi run supply-chain` | Runs the beer-game supply chain in `examples/supply_chain.py`, comparing forecasting scenarios and brewing capacity across 20 replications, and writes them under `output/supply_chain/` (see Supply chain example). |
 | `pixi run notebook` | Opens the Marimo lesson, which adds controls for staffing, shift and failure-clock rules, and customer timelines. |
 | `pixi run notebook-export` | Executes the lesson and saves `output/lesson.html`. |
 | `pixi run examples` | Runs the five tasks above that execute examples, and fails if Marimo replaced a lesson output with a size warning. |
@@ -936,7 +1085,7 @@ logistics, each with a scenario study. `pixi run operations` writes their
 comparison reports, one viewer per study, and the network diagrams under
 `output/operations/`.
 
-### A saturated machining line
+### Machining line
 
 The machining line runs blanks through a saw, two CNC machines, a washer, two
 assembly fitters, and a packer during a 480-minute shift. Blanks are released
@@ -944,7 +1093,9 @@ every 2 minutes, which is faster than the line can work, and the saw has
 `buffer=0` with `external_overflow="wait"`, so unsawn blanks wait outside the
 line as raw stock. This pattern keeps the line saturated (i.e., it never
 starves for blanks), so the parts completed by closing measure one shift's
-output from an empty line.
+output from an empty line. The video
+[FlowSim: modeling a machining line](https://youtu.be/kY1KzMO9g-I) walks
+through this model and its scenario study.
 Raw stock counts toward flow time and `remaining_at_close`, so the study reports
 `completed_at_close`, and work in process (`mean_wip`) begins only at admission
 to the saw. The CNC machines fail on a busy clock, and assembly drops to one
@@ -960,7 +1111,7 @@ are the bottleneck, so buffers help where they keep the CNC from blocking or
 starving, and failures at the bottleneck cost about as much as removing every
 buffer.
 
-### A truck cross-dock
+### Truck cross-dock
 
 The cross-dock receives inbound trucks at time-varying rates for 960 minutes.
 Two gate lanes check trucks in, and the gate has `buffer=0` with
@@ -994,7 +1145,9 @@ safety stock. `bullwhip_study` runs 20 replications of 104 weeks with a 20-week
 warm-up and compares forecasting from orders with sharing consumer demand and
 with a ten-week moving average. `pixi run supply-chain` writes the comparison
 report, the per-replication stock-point table, and the first replication's
-records and viewer under `output/supply_chain/`.
+records and viewer under `output/supply_chain/`. The video
+[FlowSim: the bullwhip effect](https://youtu.be/SbkiDw28vhI) walks through this
+study.
 
 `capacity_study` replaces the factory's two-week lead time with a brewhouse
 that makes 120, 150, or 200 cases per week in jobs of 25 cases, with a target

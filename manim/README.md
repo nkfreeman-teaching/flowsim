@@ -5,12 +5,16 @@ source as two products: a continuous MP4 and an offline HTML deck that stops at 
 until the presenter advances it. The setup was copied from
 `~/.claude/skills/manim-video/template` on 2026-10-24.
 
-| Folder | Video |
-|---|---|
-| `flowsim-core/` | FlowSim: the core workflow (model, tables, viewer, replications, comparisons, extensions) |
-| `service-day/` | FlowSim: staffing a service day (the classroom exercise) |
-| `machining-line/` | FlowSim: a saturated machining line (buffers, CNC failures, lunch staffing) |
-| `supply-chain/` | FlowSim: the bullwhip effect (four stages, demand sharing, brewing capacity) |
+| Folder | Video | Unlisted YouTube copy |
+|---|---|---|
+| `flowsim-core/` | FlowSim: the core workflow (model, tables, viewer, replications, comparisons, extensions) | https://youtu.be/lRh8qnjg4lo |
+| `service-day/` | FlowSim: staffing a service day (the classroom exercise) | https://youtu.be/z-lPhexe7ZY |
+| `machining-line/` | FlowSim: modeling a machining line (bottleneck, buffer plans, CNC failures, lunch staffing) | https://youtu.be/kY1KzMO9g-I |
+| `supply-chain/` | FlowSim: the bullwhip effect (four stages, demand sharing, brewing capacity) | https://youtu.be/SbkiDw28vhI |
+
+The four uploads are also in one unlisted
+[playlist](https://www.youtube.com/playlist?list=PLGOCHatbz0gA). A re-rendered video
+needs a new upload, since YouTube does not replace a video's file in place.
 
 ## Layout
 

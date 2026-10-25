@@ -1,4 +1,4 @@
-"""FlowSim: a saturated machining line, in four parts.
+"""FlowSim: modeling a machining line, in four parts.
 
 Each part is a manim-slides Slide, so the same source renders a continuous MP4 per part
 (joined into one video by ../render.sh) and a deck with a break at every pause():
@@ -9,7 +9,7 @@ Each part is a manim-slides Slide, so the same source renders a continuous MP4 p
     Part4Failures   the no-failure scenario and the CNC down share
 
 Sources: examples/operations.py (machining_line, BUFFER_PLANS, SHIFT, line_study),
-snippets/line.py, and the README section "A saturated machining line". capture.py runs the
+snippets/line.py, and the README section "Machining line". capture.py runs the
 study in the project environment and writes captured/numbers.json; the assertions below
 recompute every displayed number from the per-run values or the model's own parameters and
 check it against the README. Captions, fonts, and breaks come from ../shared/explainer.py.
@@ -205,7 +205,7 @@ assert list(MOVED) == ["No buffers", "Five before Assembly", "Two each, no CNC f
 assert all(close(a, b) for a, b in zip(MOVE, MOVED["Five before Assembly"]))
 assert all(close(a, b) for a, b in zip(NO_FAILURES, MOVED["Two each, no CNC failures"]))
 assert close(MOVED["No buffers"][0], -GAINS["Two each"][0])
-# README "A saturated machining line": two spaces in front of each station add more than ten
+# README "Machining line": two spaces in front of each station add more than ten
 # parts per shift relative to no buffers, moving those spaces in front of assembly changes
 # output by less than one part, and removing the CNC failures adds about as many parts again.
 readme_states("two spaces in front of each station add more than ten parts per shift relative to no buffers")
@@ -328,7 +328,7 @@ class CapacityChart:
 
 class Part1Line(CodeScene):
     def construct(self):
-        self.title_card(1, "A saturated line")
+        self.title_card(1, "Modeling the machining line")
         row, arrows = line_row()
         self.play(FadeIn(row), Create(arrows), run_time=1.0)
         self.say(f"Each blank, a raw part, is one FlowSim customer. It visits {len(NAMES)} stations, saw to pack.")
@@ -363,7 +363,7 @@ class Part1Line(CodeScene):
 
 class Part2Capacity(CodeScene):
     def construct(self):
-        self.title_card(2, "The bottleneck")
+        self.title_card(2, "Finding the bottleneck")
         chart = CapacityChart()
         self.play(FadeIn(chart.axes()), run_time=0.6)
         bars = {name: chart.bar(name, CAPACITY[name], BORDER) for name in NAMES}
@@ -427,13 +427,13 @@ class Part2Capacity(CodeScene):
 
 class Part3Buffers(CodeScene):
     def construct(self):
-        self.title_card(3, "Buffers")
+        self.title_card(3, "Comparing buffer plans")
         lines = excerpt(OPERATIONS_LINES, "# Machining line buffer plans, as waiting spaces in front of CNC, Wash,", 8)
         self.show_code(lines, OPS_NOTE, top=2.3, size=20)
         self.highlight(3, 7)
         self.say("Each plan sets the spaces before CNC, wash, assembly, and pack.")
         self.pause("plans")
-        self.say(f"Two each and five before assembly both place {SPACES} spaces, differently.")
+        self.say(f'Both "Two each" and "Five before Assembly" place {SPACES} spaces. They put them at different stations.')
         self.pause("budget")
 
         rows = SCENARIOS[:3]
@@ -457,7 +457,7 @@ class Part3Buffers(CodeScene):
         self.play(FadeIn(chart.interval(2, *OUTPUT["Five before Assembly"], PLAN_COLORS["Five before Assembly"])), run_time=0.6)
         self.pause("five")
         lines = excerpt(file_lines(HERE / "snippets" / "line.py"), "moved = comparison.differences(", 9)
-        self.say('baseline="Two each" pairs each plan with two each, shift by shift.')
+        self.say('baseline="Two each" subtracts that plan\'s output from each plan\'s. It pairs them shift by shift.')
         self.clear_stage()
         self.code_and_table(lines, SNIPPET_NOTE, HERE, CAPTURED, "moved", size=20, max_width=8.0, side=True)
         self.pause("moved")
@@ -488,7 +488,7 @@ class Part3Buffers(CodeScene):
 
 class Part4Failures(CodeScene):
     def construct(self):
-        self.title_card(4, "CNC failures")
+        self.title_card(4, "Measuring the cost of CNC failures")
         chart = RowChart(SCENARIOS, 140, [90, 100, 110, 120, 130, 140], "Parts finished by closing", left=-1.6, top=1.5, x_min=90)
         self.play(FadeIn(chart.axes()), run_time=0.6)
         self.play(
@@ -513,5 +513,5 @@ class Part4Failures(CodeScene):
         shot.move_to([0, CONTENT_Y - 0.3, 0])
         self.play(FadeIn(shot), run_time=0.6)
         self.pause("viewer")
-        self.say(f"Buffers cut CNC blocking. Ending all CNC failures too adds about as much again, {BOTH:.1f} in all.")
+        self.say(f"Buffers add parts by cutting CNC blocking. Ending CNC failures too adds about as many again, {BOTH:.1f} parts in all.")
         self.pause("end", hold=3.5)

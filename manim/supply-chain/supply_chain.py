@@ -329,7 +329,7 @@ class AmplificationChart:
 
 class Part1Chain(CodeScene):
     def construct(self):
-        self.title_card(1, "A four-stage chain")
+        self.title_card(1, "Modeling the beer game chain")
         row, up, down = chain_row()
         self.play(FadeIn(row), run_time=0.8)
         self.say("A stock point holds inventory and fills orders. It reorders from upstream.")
@@ -374,13 +374,13 @@ class Part1Chain(CodeScene):
 
 class Part2Bullwhip(CodeScene):
     def construct(self):
-        self.title_card(2, "The bullwhip effect")
+        self.title_card(2, "Measuring the bullwhip effect")
         shot = screenshot(HERE, CAPTURED, "orders", width=11.5, height=5.6)
         shot.move_to([0, CONTENT_Y - 0.25, 0])
         self.play(FadeIn(shot), run_time=0.6)
         self.say("In the first run, factory orders swing far more than consumer demand.")
         self.pause("orders")
-        self.say("The dashed line ends the warm-up, which holds the startup surge.")
+        self.say("The dashed line marks the end of the warm-up. Orders surge at startup, before it.")
         self.pause("warmup")
 
         mean, lower, upper = RATIO["Retailer"]["Forecast from orders"]
@@ -402,7 +402,7 @@ class Part2Bullwhip(CodeScene):
         self.pause("simulated")
 
         amp = AmplificationChart(["Forecast from orders"])
-        self.say("Ratios compound, so each stage's orders vary more than the last.")
+        self.say("Each stage multiplies the swing it receives. Orders vary more at every stage up the chain.")
         self.clear_stage()
         self.play(FadeIn(amp.axes()), FadeIn(footnote("Each gridline is ten times the one below.")), run_time=0.6)
         for stage in STAGES:
@@ -415,11 +415,11 @@ class Part2Bullwhip(CodeScene):
 
 class Part3Sharing(CodeScene):
     def construct(self):
-        self.title_card(3, "Sharing demand")
+        self.title_card(3, "Sharing consumer demand")
         study = excerpt(function_lines(SUPPLY, "bullwhip_study"), "    return compare(", 11)
         self.show_code(study, "examples/supply_chain.py, bullwhip_study", top=2.3, size=22)
         self.highlight(3)
-        self.say('forecast_from="end_demand" shares consumer demand. Every stage sees it.')
+        self.say('forecast_from="end_demand" shares consumer demand. Every stage forecasts from it.')
         self.pause("share")
         self.say("The third scenario averages ten weeks instead of five.")
         self.highlight(4)
@@ -432,7 +432,7 @@ class Part3Sharing(CodeScene):
         for scenario in SCENARIOS[:2]:
             self.play(*(FadeIn(amp.bar(scenario, stage)) for stage in STAGES), run_time=0.6)
         self.pause("shared")
-        self.say(f"A ten-week average damps every stage. Factory orders vary {AMPLIFICATION[SCENARIOS[2]]['Factory']:.1f} times as much as consumer demand.")
+        self.say(f"A ten-week average lowers every stage's ratio. Factory orders vary {AMPLIFICATION[SCENARIOS[2]]['Factory']:.1f} times as much as consumer demand.")
         self.play(*(FadeIn(amp.bar(SCENARIOS[2], stage)) for stage in STAGES), run_time=0.6)
         self.pause("ten-chart")
         self.say(
@@ -487,7 +487,7 @@ class Part3Sharing(CodeScene):
 
 class Part4Capacity(CodeScene):
     def construct(self):
-        self.title_card(4, "Brewing at a station")
+        self.title_card(4, "Modeling brewing capacity")
         lines = excerpt(GAME_CODE, "    if brews:", 7)
         self.show_code(lines, GAME_NOTE, top=2.3, size=22)
         self.highlight(1, 5)
@@ -561,5 +561,5 @@ class Part4Capacity(CodeScene):
         self.play(FadeIn(chart.interval(4, *CAP_FILL[rows[4]], CAP_COLORS[rows[4]])), FadeIn(job_text(4)), run_time=0.5)
         self.play(FadeIn(ratio_text(4)), run_time=0.4)
         self.pause("cover")
-        self.say("Capacity changes the fill rate, not the orders. Longer cover raises the fill rate but makes orders more variable.")
+        self.say("Faster brewing raises the fill rate and leaves orders unchanged. Three weeks of cover raises the fill rate and the factory's ratio.")
         self.pause("end", hold=3.5)

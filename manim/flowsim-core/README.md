@@ -7,7 +7,7 @@ root).
 
 | Scene | Part | Starts at slide | Source |
 |---|---|---|---|
-| `Part1Model` | Builds the deterministic queue (title "A model in five calls") from `Model()`, a source, a station, and a route, then runs it | 1 | `examples/models.py` (`deterministic_queue`), `snippets/queue.py` |
+| `Part1Model` | Builds the deterministic queue (title "Building a model") from `Model()`, a source, a station, and a route, then runs it | 1 | `examples/models.py` (`deterministic_queue`), `snippets/queue.py` |
 | `Part2Hand` | Times the three customers by hand on a Gantt chart, then draws the waiting line and the busy server | 10 | README "For maintainers" |
 | `Part3Tables` | Shows the customers, visits, stations, and summary tables as Polars displays them, and matches them to the hand values | 16 | `snippets/queue.py`, README "Results" |
 | `Part4Viewer` | Shows the saved offline viewer (station table, queue chart, customer 3's timeline) and the exported files | 23 | `snippets/queue.py`, README "Results" |

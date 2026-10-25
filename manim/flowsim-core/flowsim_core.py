@@ -331,7 +331,7 @@ CoreScene = CodeScene
 
 class Part1Model(CoreScene):
     def construct(self):
-        self.title_card(1, "A model in five calls")
+        self.title_card(1, "Building a model")
         row, arrows = network_row()
         self.play(FadeIn(row), run_time=0.8)
         self.say("FlowSim simulates customers who arrive, wait for servers, and leave.")
@@ -486,7 +486,7 @@ class Gantt:
 
 class Part2Hand(CoreScene):
     def construct(self):
-        self.title_card(2, "Timing by hand")
+        self.title_card(2, "Checking the timing by hand")
         chart = Gantt()
         axis, rows, marks = chart.axis(), chart.row_labels(), chart.arrival_marks()
         self.play(FadeIn(axis), FadeIn(rows[:3]), run_time=0.8)
@@ -541,7 +541,7 @@ class Part3Tables(CoreScene):
         self.table = self.code_and_table(lines, QUEUE_NOTE, HERE, CAPTURED, name, size=18, x=-3.2, drop=(self.table, *drop))
 
     def construct(self):
-        self.title_card(3, "Four result tables")
+        self.title_card(3, "Reading the result tables")
         self.table = None
         self.show_table("customers", "customers = results.customers.select(", 7)
         self.say("results.customers has one row per customer. Flow time runs from arrival to exit.")
@@ -583,7 +583,7 @@ class Part3Tables(CoreScene):
 
 class Part4Viewer(CoreScene):
     def construct(self):
-        self.title_card(4, "The offline viewer and export")
+        self.title_card(4, "Viewing and exporting results")
         lines = code_lines_of(QUEUE_SNIPPET, 'results.viewer("output/queue/viewer.html")', 2)
         self.show_code(lines, QUEUE_NOTE, top=2.3, size=22)
         self.highlight(0)
@@ -600,7 +600,7 @@ class Part4Viewer(CoreScene):
         self.say(f"The 95th percentile wait interpolates between sorted waits. Waits 0, 1, and 2 give {P95_WAIT:g}.")
         self.pause("percentile")
 
-        self.say("Its charts show the line over time. The slider below them zooms in.")
+        self.say("Its chart shows waiting customers and occupied servers over time. The slider below it zooms in.")
         self.drop_code(shot)
         shot = screenshot(HERE, CAPTURED, "viewer_queues", width=11.0, height=5.6)
         shot.move_to([0, CONTENT_Y - 0.3, 0])
@@ -688,7 +688,7 @@ class DotPlot:
 
 class Part5Replications(CoreScene):
     def construct(self):
-        self.title_card(5, "Replications and intervals")
+        self.title_card(5, "Estimating mean wait from replications")
         lines = code_lines_of(REPLICATION_SNIPPET, "from examples.models import service_network", 8)
         self.show_code(lines, "manim/flowsim-core/snippets/replications.py", top=2.3, size=22)
         self.highlight(2)
@@ -773,7 +773,7 @@ class Part6Compare(CoreScene):
             f"The {REPS['confidence']:.0%} CI is {signed(lower)} to {signed(upper)}.",
         )
         self.pause("paired-read")
-        self.say("Both staffings see the same busy and quiet days. Pairing cancels that shared noise.")
+        self.say("Both staffings see the same busy and quiet days. Pairing removes the variation they share.")
         self.pause("shared-days")
         self.say(f"Unpaired, these runs give a CI half-width of {UNPAIRED_HALF:.2f} minutes. Pairing narrows it to {PAIRED_HALF:.2f}.")
         self.pause("paired-width")
@@ -844,7 +844,7 @@ class Part7Extensions(CoreScene):
         return VGroup(items)
 
     def construct(self):
-        self.title_card(7, "Beyond one line")
+        self.title_card(7, "Adding other model features")
         strip = None
         for name, heading, _, _ in TOUR:
             captions = self.CAPTIONS[name]

@@ -1,4 +1,4 @@
-# Copied from ~/.claude/skills/manim-video/template on 2026-10-24.
+# Copied from ~/.claude/skills/manim-video/template on 2026-10-25.
 """Display conventions shared by every video in this folder.
 
 A video module imports from here and adds its own visual pieces (a Gantt chart, a plot, an
@@ -430,9 +430,10 @@ class ExplainerScene(Slide):
     # at every break. check lists each violation and a render stops on one. None turns the
     # check off, e.g., for a video with a full-frame background object.
     caption_gap = 0.4
-    # Whether a part's title card shows "Part N" above the title. A pitch or a walkthrough
-    # with plain section headers turns it off (2026-10-19).
-    part_label = True
+    # Whether a part's title card shows "Part N" above the title. Off by default since
+    # 2026-10-25, when the owner ruled that the label reads as out of place; an older video
+    # that relies on it sets it to True.
+    part_label = False
     # A section card's heading size and the size of the sentence under it.
     section_size = 60
     section_body_size = 34
@@ -551,6 +552,13 @@ class ExplainerScene(Slide):
         """The part's opening card, which the click that starts the part also clears."""
         rows = [label(f"Part {number}", size=30, color=MUTED)] if self.part_label else []
         card = VGroup(*rows, label(title, size=52)).arrange(DOWN, buff=0.3)
+        # A title that says what the part does runs longer than a two-word label, so it
+        # must keep the 0.5-unit margin at each frame edge.
+        if card.width > config.frame_width - 1.0:
+            error = f"title {title!r} is {card.width:.2f} wide; at most {config.frame_width - 1.0:.2f} fits"
+            if not config["dry_run"]:
+                raise ValueError(error)
+            self.caption_errors.append(error)
         self.helper_playing = True
         self.play(FadeIn(card, shift=0.2 * UP), run_time=0.8)
         self.mark("title", offset=0.0)
@@ -687,6 +695,5 @@ class PitchScene(ExplainerScene):
     caption_max_width = 12.4
     caption_split_words = True
     caption_max_lines = 3
-    part_label = False
     section_size = 72
     section_body_size = 45

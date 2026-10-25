@@ -1,4 +1,4 @@
-# FlowSim: a saturated machining line
+# FlowSim: modeling a machining line
 
 A four-part teaching video. The continuous video is `output/MachiningLine.mp4`, and the
 deck is `output/deck/MachiningLine.html` (both rebuilt by `pixi run render machining-line
@@ -7,10 +7,10 @@ from the project root).
 
 | Scene | Part | Starts at slide | Source |
 |---|---|---|---|
-| `Part1Line` | Draws the five-station line (plus a source) and reads the blank release and the saw's zero buffer from the code | 1 | `examples/operations.py` (`machining_line`), README "A saturated machining line" |
+| `Part1Line` | Draws the five-station line (plus a source) and reads the blank release and the saw's zero buffer from the code | 1 | `examples/operations.py` (`machining_line`), README "Machining line" |
 | `Part2Capacity` | Computes rough capacity per station, then adds the lunch staffing and the CNC failures, with the saved viewer's resource charts | 11 | `examples/operations.py`, `snippets/line.py` |
 | `Part3Buffers` | Compares the buffer plans by parts per shift and by CNC blocking, with the relocation and paired gains tables | 22 | `examples/operations.py` (`BUFFER_PLANS`, `line_study`), `snippets/line.py` |
-| `Part4Failures` | Adds the no-failure scenario, the CNC down share, and the saved comparison viewer | 30 | `snippets/line.py`, README "A saturated machining line" |
+| `Part4Failures` | Adds the no-failure scenario, the CNC down share, and the saved comparison viewer | 30 | `snippets/line.py`, README "Machining line" |
 
 The deck has 34 slides. The slide numbers change if a part gains or loses a break. Every displayed number is
 asserted against the sources above when the module is imported.
@@ -29,11 +29,11 @@ approved before the build.
 | blank, release, customer | A raw part, and the time it enters the system; FlowSim calls each blank a customer | examples/operations.py docstring | 1 |
 | `lambda rng:` | A function FlowSim calls with the run's random generator to draw each time (the saw takes 2.5 to 3.5 minutes) | examples/operations.py | 1 |
 | buffer | The waiting spaces in front of a station, apart from its servers | README "Finite buffers and blocking" | 1 |
-| `external_overflow="wait"`, raw stock | Released blanks that find the saw busy wait outside the line | README "A saturated machining line" | 1 |
-| saturated | The line never runs out of blanks, so its output measures one shift's output from an empty line | README "A saturated machining line" | 1 |
+| `external_overflow="wait"`, raw stock | Released blanks that find the saw busy wait outside the line | README "Machining line" | 1 |
+| saturated | The line never runs out of blanks, so its output measures one shift's output from an empty line | README "Machining line" | 1 |
 | `completed_at_close` | Parts finished by the end of the 480-minute shift, starting from an empty line | README metric table | 1 |
 | rough capacity | Shift minutes times average servers divided by mean minutes per part, ignoring variability and blocking | computed here, not stated in the README | 2 |
-| bottleneck | The station with the lowest rough capacity | README "A saturated machining line" | 2 |
+| bottleneck | The station with the lowest rough capacity | README "Machining line" | 2 |
 | viewer | The saved web page FlowSim writes for one run or a comparison | README "Getting started" | 2 |
 | staffing, lunch | The scheduled fitters, which drop from two to one from minute 240 to 300 | examples/operations.py | 2 |
 | failure, repair, `failure_clock="busy"` | A machine breaks after a sampled amount of cutting time (90 minutes on average) and is down for a sampled repair (10 to 30 minutes, 20 on average), with no shared repair crew | README "Failures and repair" | 2 |

@@ -215,7 +215,7 @@ class LoadChart:
 
 class Part1Predict(CodeScene):
     def construct(self):
-        self.title_card(1, "Predict the bottleneck")
+        self.title_card(1, "Predicting the bottleneck")
         row, arrows = network_row()
         self.play(FadeIn(row), Create(arrows), run_time=0.8)
         self.say("A source creates customers. Each station has servers and one waiting line.")
@@ -280,7 +280,7 @@ class Part1Predict(CodeScene):
 
 class Part2Day(CodeScene):
     def construct(self):
-        self.title_card(2, "One simulated day")
+        self.title_card(2, "Simulating one day")
         lines = excerpt(file_lines(HERE / "snippets" / "exercise.py"), "comparison, decision = staffing_exercise()", 5)
         self.show_code(lines, "manim/service-day/snippets/exercise.py", top=2.3, size=20)
         self.highlight(2)
@@ -320,7 +320,7 @@ class Part2Day(CodeScene):
 
 class Part3Targets(CodeScene):
     def construct(self):
-        self.title_card(3, "Two targets")
+        self.title_card(3, "Setting the wait and overtime targets")
         lines = excerpt(file_lines(EXERCISE), "DAY_LENGTH = 480  # operating minutes per simulated day", 7)
         self.show_code(lines, EXERCISE_NOTE, top=2.3, size=20)
         self.highlight(0, 1)
@@ -358,7 +358,7 @@ class Part3Targets(CodeScene):
 
 class Part4Compare(CodeScene):
     def construct(self):
-        self.title_card(4, "Twenty days per level")
+        self.title_card(4, "Comparing staffing levels")
         lines = excerpt(function_lines(EXERCISE, "staffing_exercise"), "    scenarios = {", 11)
         self.show_code(lines, EXERCISE_NOTE + ", staffing_exercise", top=2.3, size=20)
         self.highlight(0, 3)
@@ -424,7 +424,7 @@ class Part4Compare(CodeScene):
 
 class Part5Decide(CodeScene):
     def construct(self):
-        self.title_card(5, "Pick the staffing")
+        self.title_card(5, "Choosing the staffing level")
         lines = excerpt(file_lines(HERE / "snippets" / "exercise.py"), "targets = decision.select(", 6)
         table = self.code_and_table(lines, "manim/service-day/snippets/exercise.py", HERE, CAPTURED, "decision", size=20, max_width=10.5)
         self.say("The decision table tests each level's mean total wait and on-time days.")
