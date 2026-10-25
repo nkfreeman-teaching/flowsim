@@ -248,7 +248,7 @@
       template: "plotly_white", height: 350, barmode: "overlay",
       font: {family: "Georgia, serif", size: 14},
       xaxis: {title: {text: "Simulation time (" + escapeText(unit) + ")"}, rangemode: "tozero"},
-      yaxis: {title: {text: "Station"}, autorange: "reversed"},
+      yaxis: {title: {text: "Station", standoff: 12}, autorange: "reversed", automargin: true},
       margin: {l: 100, r: 20, t: 35, b: 70},
       legend: {orientation: "h", x: 0, y: 1.15}
     }, config);

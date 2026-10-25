@@ -511,7 +511,7 @@ def metric_units(metric: str, time_unit: str) -> str:
         "rate": f"customers per {time_unit}",
         "fraction": "share",
         "servers": "servers",
-        "customers": "customers",
+        "customers": "count",
         "units": "units",
         "ratio": "variance ratio",
     }[METRICS[metric].kind]

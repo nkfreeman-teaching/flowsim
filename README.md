@@ -887,7 +887,7 @@ names one.
 | `mean_wait` | Station | Mean station waiting time |
 | `mean_queue` | Station | Time-average customers waiting |
 | `utilization` | Station | Occupied share of installed capacity |
-| `p95_wait` | Station | 95th percentile station waiting time |
+| `p95_wait` | Station | 95th percentile station waiting time, interpolated linearly between the two nearest observed waits |
 | `processing_utilization` | Station | Processing share of installed capacity |
 | `blocking_fraction` | Station | Blocked share of installed capacity |
 | `downtime_fraction` | Station | Down share of installed capacity |
@@ -943,7 +943,8 @@ assembly fitters, and a packer during a 480-minute shift. Blanks are released
 every 2 minutes, which is faster than the line can work, and the saw has
 `buffer=0` with `external_overflow="wait"`, so unsawn blanks wait outside the
 line as raw stock. This pattern keeps the line saturated (i.e., it never
-starves for blanks), so the parts completed by closing measure its capacity.
+starves for blanks), so the parts completed by closing measure one shift's
+output from an empty line.
 Raw stock counts toward flow time and `remaining_at_close`, so the study reports
 `completed_at_close`, and work in process (`mean_wip`) begins only at admission
 to the saw. The CNC machines fail on a busy clock, and assembly drops to one
