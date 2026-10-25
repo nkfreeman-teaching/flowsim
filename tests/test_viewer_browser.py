@@ -183,6 +183,34 @@ def test_scenario_report_renders_intervals_offline(tmp_path, offline_page):
     ) == [-1]
 
 
+def test_scenario_report_moves_axis_titles_below_narrow_charts(tmp_path, offline_page):
+    comparison = compare(
+        scenarios={
+            "One server": deterministic_queue(),
+            "Two servers": deterministic_queue(capacity=2),
+        },
+        duration=3,
+        replications=3,
+        drain=True,
+    )
+    viewer = tmp_path / "comparison.html"
+    comparison.viewer(viewer)
+    page = offline_page(viewer)
+    page.wait_for_function("document.querySelectorAll('.axis-note').length === 2")
+    title = "document.getElementById('scenario-means').layout.xaxis.title.text"
+    note = "document.querySelector('.axis-note')"
+    wide = page.evaluate(title)
+    assert wide == "Mean total waiting time (minutes)"
+    assert page.evaluate(f"{note}.hidden")
+    page.set_viewport_size({"width": 400, "height": 900})
+    page.wait_for_function(f"!{note}.hidden")
+    assert page.evaluate(title) == ""
+    assert page.evaluate(f"{note}.textContent") == wide
+    page.set_viewport_size({"width": 1400, "height": 1000})
+    page.wait_for_function(f"{note}.hidden")
+    assert page.evaluate(title) == wide
+
+
 def test_extended_viewer_shows_resource_states_rejections_and_paused_work(
     tmp_path, offline_page
 ):

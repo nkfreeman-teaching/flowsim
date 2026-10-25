@@ -10,14 +10,16 @@ p {line-height: 1.5;} h1 {font-size: 28px;} h2 {font-size: 20px;}
 table {border-collapse: collapse; width: 100%;}
 td,th {text-align: right; padding: 10px; border-bottom: 1px solid #e4eaef;}
 td:first-child,th:first-child {text-align: left;}
+.table-scroll {overflow-x: auto;}
+.axis-note {margin: 0 0 12px; text-align: center; font: 14px Georgia, serif;}
 </style></head><body><main>
 <h1>Scenario comparison</h1><p>__TEXT__</p>
 <section><h2>__TITLE__</h2>
 <p>Points show means across independent replications.
 Intervals show __CONFIDENCE__ Student t uncertainty across run estimates.</p>
 __MEANS__
-<table><thead><tr><th>Scenario</th><th>Mean (__UNITS__)</th><th>Lower limit (__UNITS__)</th><th>Upper limit (__UNITS__)</th><th>Observed runs</th></tr></thead>
-<tbody>__TABLE_ROWS__</tbody></table></section>
+<div class="table-scroll"><table><thead><tr><th>Scenario</th><th>Mean (__UNITS__)</th><th>Lower limit (__UNITS__)</th><th>Upper limit (__UNITS__)</th><th>Observed runs</th></tr></thead>
+<tbody>__TABLE_ROWS__</tbody></table></div></section>
 <section><h2>Difference from __REFERENCE__</h2>
 <p>Each difference is the scenario value minus its baseline value within the same
 replication. Negative values indicate a smaller metric. The dashed line marks zero.</p>
@@ -25,4 +27,36 @@ __CHANGES__</section>
 <p>The saved report works offline. Intervals describe the selected finite-day statistic.
 They do not establish steady-state performance. Wait and flow averages exclude rejected
 arrivals, which can be compared separately. Raw runs remain available in Python.</p>
-</main></body></html>
+</main>
+<script>
+// Plotly centers an axis title on the plot area, which long scenario names push to
+// the right, so on narrow pages the title moves to a line below the chart that wraps.
+window.addEventListener("load", () => {
+  const narrowWidth = 500;
+  for (const id of ["scenario-means", "scenario-differences"]) {
+    const chart = document.getElementById(id);
+    const title = chart.layout.xaxis.title.text;
+    const bottom = chart.layout.margin.b;
+    const note = document.createElement("p");
+    note.className = "axis-note";
+    // flowsim.plots.label escaped the title, so it is shown as text.
+    note.innerHTML = title;
+    note.hidden = true;
+    // Plotly wraps the chart in a fixed-height block, so the note goes after that block.
+    let block = chart;
+    while (block.parentElement.tagName !== "SECTION") block = block.parentElement;
+    block.after(note);
+    let narrow = null;
+    const fit = () => {
+      const now = chart.clientWidth < narrowWidth;
+      if (now === narrow) return;
+      narrow = now;
+      note.hidden = !now;
+      Plotly.relayout(chart, {"xaxis.title.text": now ? "" : title, "margin.b": now ? 40 : bottom});
+    };
+    fit();
+    window.addEventListener("resize", fit);
+  }
+});
+</script>
+</body></html>
