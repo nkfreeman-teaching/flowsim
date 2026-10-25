@@ -167,6 +167,15 @@ assert round(float(CNC_PART), 2) == 7.33 and round(float(CNC_WITH_FAILURES)) == 
 WITH_FAILURES = {**CAPACITY, "CNC": CNC_WITH_FAILURES}
 BOTTLENECK = min(WITH_FAILURES, key=WITH_FAILURES.get)
 readme_states("The CNC machines are the bottleneck")
+# Every blank takes one route, saw to pack: no branch sends a part elsewhere, and FlowSim
+# has no rework loops (README "Operations examples" and "Scope and limits").
+readme_states("every blank follows the same routing")
+readme_states("rework loops are not implemented")
+_line_text = "\n".join(LINE_CODE)
+assert _line_text.count("model.route(") == 1 and "model.branch(" not in _line_text
+# The CNC resource chart is captured zoomed to these minutes of day 1.
+CNC_WINDOW = CAPTURED["cnc_window"]
+assert CNC_WINDOW == [250, 400] and CNC_WINDOW[1] <= SHIFT
 assert BOTTLENECK == "CNC"
 assert RELEASED > max(WITH_FAILURES.values())
 
@@ -190,6 +199,12 @@ for name in SCENARIOS[1:]:
     assert all(close(a, b) for a, b in zip(GAINS[name], CAPTURED["gains"][name]))
 MOVE = paired("Five before Assembly", "Two each")
 NO_FAILURES = paired("Two each, no CNC failures", "Two each")
+# snippets/line.py also asks FlowSim for these pairings against two each.
+MOVED = CAPTURED["moved"]
+assert list(MOVED) == ["No buffers", "Five before Assembly", "Two each, no CNC failures"]
+assert all(close(a, b) for a, b in zip(MOVE, MOVED["Five before Assembly"]))
+assert all(close(a, b) for a, b in zip(NO_FAILURES, MOVED["Two each, no CNC failures"]))
+assert close(MOVED["No buffers"][0], -GAINS["Two each"][0])
 # README "A saturated machining line": two spaces in front of each station add more than ten
 # parts per shift relative to no buffers, moving those spaces in front of assembly changes
 # output by less than one part, and removing the CNC failures adds about as many parts again.
@@ -320,6 +335,8 @@ class Part1Line(CodeScene):
         self.pause("line")
         self.say("A station has identical servers and one line. CNC (computer numerical control) is automated cutting.")
         self.pause("station")
+        self.say("Every blank follows this one routing. No part is scrapped or reworked.")
+        self.pause("routing")
 
         lines = excerpt(LINE_CODE, "    blanks = model.source(", 12)
         self.say(f"A blank is released every {SOURCE['interarrival']} minutes, {RELEASED} in a {SHIFT}-minute shift.")
@@ -340,7 +357,7 @@ class Part1Line(CodeScene):
         self.pause("blocking")
         self.say("The saw never runs short of blanks, so the line is saturated.")
         self.pause("saturated")
-        self.say(f"completed_at_close counts parts done by minute {SHIFT}, starting empty. It measures capacity.")
+        self.say(f"completed_at_close counts parts done by minute {SHIFT}. It measures one shift's output from an empty line.")
         self.pause("end", hold=3.5)
 
 
@@ -381,7 +398,10 @@ class Part2Capacity(CodeScene):
         self.say('failure_clock="busy" counts only cutting time toward the next failure.')
         self.highlight(4)
         self.pause("clock")
-        self.say("Day 1 here uses two buffer spaces each. Black marks broken CNC machines and green blocked ones.")
+        self.say(
+            f"Minutes {CNC_WINDOW[0]} to {CNC_WINDOW[1]} of day 1, with two buffer spaces each. "
+            "Black marks broken CNC machines, green blocked ones.",
+        )
         shot = screenshot(HERE, CAPTURED, "resources_cnc", width=11.0, height=5.4)
         shot.move_to([0, CONTENT_Y - 0.2, 0])
         self.drop_code()
@@ -436,6 +456,11 @@ class Part3Buffers(CodeScene):
         )
         self.play(FadeIn(chart.interval(2, *OUTPUT["Five before Assembly"], PLAN_COLORS["Five before Assembly"])), run_time=0.6)
         self.pause("five")
+        lines = excerpt(file_lines(HERE / "snippets" / "line.py"), "moved = comparison.differences(", 9)
+        self.say('baseline="Two each" pairs each plan with two each, shift by shift.')
+        self.clear_stage()
+        self.code_and_table(lines, SNIPPET_NOTE, HERE, CAPTURED, "moved", size=20, max_width=8.0, side=True)
+        self.pause("moved")
 
         self.say(
             f"Buffers cut CNC blocked time from {percent(CNC_BLOCKED['No buffers'])} to {percent(CNC_BLOCKED['Two each'])}. "

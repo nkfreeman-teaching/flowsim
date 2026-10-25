@@ -18,11 +18,14 @@ means = comparison.intervals().select(
     "lower",
     "upper",
 )
-paired = comparison.differences().select(
+paired = comparison.differences(baseline="Two servers").select(
     "scenario",
     "baseline",
     "mean",
     "lower",
     "upper",
 )
-comparison.viewer("output/staffing/comparison.html")
+comparison.viewer(
+    path="output/staffing/comparison.html",
+    baseline="Two servers",
+)

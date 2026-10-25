@@ -12,10 +12,10 @@ root).
 | `Part3Tables` | Shows the customers, visits, stations, and summary tables as Polars displays them, and matches them to the hand values | 16 | `snippets/queue.py`, README "Results" |
 | `Part4Viewer` | Shows the saved offline viewer (station table, queue chart, customer 3's timeline) and the exported files | 23 | `snippets/queue.py`, README "Results" |
 | `Part5Replications` | Runs 20 days of the two-stage network and builds a 95% confidence interval for the Service mean wait | 30 | `snippets/replications.py`, README "Replications and scenario comparisons" |
-| `Part6Compare` | Compares one, two, and three Service servers on common seeds, with paired differences and the comparison viewer | 38 | `snippets/compare.py`, README same section |
-| `Part7Extensions` | Tours branches, types, schedules, buffers, priorities and patience, failures, and stock points through README blocks | 46 | README "Model features" |
+| `Part6Compare` | Compares one, two, and three Service servers on common seeds, with paired differences against two servers and the comparison viewer | 38 | `snippets/compare.py`, README same section |
+| `Part7Extensions` | Tours branches, types, schedules, buffers, priorities and patience, failures, and stock points through README blocks | 48 | README "Model features" |
 
-The deck has 60 slides. The slide numbers change if a part gains or loses a break. Every displayed number is
+The deck has 62 slides. The slide numbers change if a part gains or loses a break. Every displayed number is
 asserted against the sources above when the module is imported.
 
 ## Plan
@@ -73,8 +73,8 @@ files and README blocks; `flowsim_core.py` asserts each one as listed.
 | `Part2Hand` | A hand Gantt chart of three customers, the waiting-line step chart, and the busy server bar | waits 0, 1, 2; queue area 3 over 7 minutes; busy 6 of 7 (recomputed, then asserted against README "For maintainers" and the captured run) | after arrivals, service, waits, the queue, and utilization |
 | `Part3Tables` | The four tables as Polars displays them, each with its `select` code | waits, flow times, mean queue 3/7, utilization 6/7, throughput 3/7 (captured, asserted equal to the hand values) | one per table, and at the match |
 | `Part4Viewer` | `viewer` and `export` code, then viewer screenshots (station table, queue chart, customer 3's timeline) and the exported file list | customer 3's flow time 4 (captured, asserted against the hand chart) | one per screenshot |
-| `Part5Replications` | `experiment` code, a dot plot of the 20 days' Service mean waits, and the interval table | 20 runs, the mean and 95% limits (recomputed from the 20 run values with t = 2.093 and asserted against the library) | after the code, the dots, the interval, and the scope note |
-| `Part6Compare` | `compare` code, the scenario means, and the paired differences from the saved comparison viewer | scenario means and paired differences with limits (recomputed from per-day values and asserted); same seeds in every scenario (asserted) | after the code, the means, and the differences |
+| `Part5Replications` | `experiment` code, a dot plot of the 20 days' Service mean waits, and the interval table | 20 runs, the mean and 95% limits for Service and for Check-in, which the interval table also shows (recomputed from the 20 run values with t = 2.093 and asserted against the library) | after the code, the dots, the interval, and the scope note |
+| `Part6Compare` | `compare` code, the scenario means, the paired differences against Two servers, and the saved comparison viewer | scenario means and paired differences with limits (recomputed from per-day values and asserted); baseline parsed from the snippet and asserted against the capture; same seeds in every scenario (asserted); unpaired half-width 0.74 (two-sample t with 38 degrees of freedom, t = 2.024) against paired 0.63 (asserted narrower) | after the code, the means, the differences, the shared days, the two widths, and the viewer |
 | `Part7Extensions` | One README excerpt per extension (branches, types, schedules, buffers, priorities and abandonment, failures, stock points), each from a block that `capture.py` runs | none | one per extension, and the closing rule |
 
 Decisions taken in the plan: the hand-timing part comes before the tables so the tables
@@ -153,6 +153,10 @@ disposition. Finding numbers are Codex's. Findings 1, 2, and 46 span all four vi
 | R2 C3 | HTML remains unexpanded, and the CSV expansion omits "values". | Accepted. 'hypertext markup language (HTML)' and 'comma-separated values (CSV)'. |
 | R2 C4 | The new qualification correctly states the behavior but introduces "preempting" without a gloss for the undergraduate audience. | Accepted. Same fix as S3. |
 
-After these changes, `check` passed for all four videos, every part was re-rendered at final quality, the final sheets were read again, and `check_deck.py` was rerun.
+| Owner | Pair against Two servers rather than One server, where pairing barely narrowed the interval (I1-Q1, P1-Q4, I2-Q1). | Done. `snippets/compare.py` sets `baseline="Two servers"` for `differences` and the viewer; Part 6 reads the third server's −2.1 minutes (95% CI −2.8 to −1.5) and states the unpaired and paired half-widths, 0.74 and 0.63. |
+| Owner | Record the Check-in interval that the waits table shows (C1-Q1). | Done. `capture.py` records Check-in's runs and interval, and the module asserts them. |
+| Owner | The timeline's rotated "Station" title touched its tick label (I1-Q3). | Done in `flowsim/viewer.html` (`automargin` and a 12-pixel standoff), then recaptured. |
+
+After the round 2 changes, `check` passed for all four videos, every part was re-rendered at final quality, the final sheets were read again, and `check_deck.py` was rerun. The owner rows were answered after the loop; their check renders passed, and the closing checkpoint read them.
 
 Rows marked R1 and R2 come from rounds 1 and 2 of the review loop in `review-loop/2026-10-24-flowsim-teaching-videos/` (snapshots a6e233f0cd1d and b951369bd929), whose ids are the reviewers' (S student, I instructor, P practitioner, C Codex correctness). The loop's `progress.md` records each verification.

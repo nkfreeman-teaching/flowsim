@@ -65,7 +65,7 @@ HIGHLIGHT = ManimColor("#FFE9A8")
 MAX_CODE_LINES = 15
 # Student t quantiles for two-sided 95% intervals, keyed by degrees of freedom, from
 # scipy.stats.t.ppf(0.975, df). The videos recompute every interval from run values.
-T95 = {19: 2.093024054408263}
+T95 = {19: 2.093024054408263, 38: 2.0243941639119694}
 # Colors the FlowSim viewers use for waiting and service, kept so a drawn chart and a
 # screenshot of the viewer agree.
 WAIT_BLUE = ManimColor("#0072B2")

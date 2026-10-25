@@ -1,6 +1,6 @@
 {
   "sources": {
-    "manim/flowsim-core/snippets/compare.py": "4ae10a151ddf751e12543913c9699d3f6aae2dac42279d35911d278bb395c20e",
+    "manim/flowsim-core/snippets/compare.py": "61e9bd10a0a876cbbcf78d2bc374638b53253d97feb5bc71e9ee2c3bedaf4465",
     "manim/flowsim-core/snippets/queue.py": "975d054ab3fb08a2ae9ddabb31625de2de7ed043ed7a3020f76f225153c4e901",
     "manim/flowsim-core/snippets/replications.py": "f9244381f0b70287cdab8c66507a11c5960f7f7bebbd3fb3579a344900f767f2",
     "examples/models.py": "45afeb67e2c9ff6ee9aa4ffca22e6a5a6d425b3abac7d5894ae8a2dfd49ea4c7"
@@ -79,7 +79,7 @@
     "paired": {
       "file": "paired.png",
       "size": [
-        1240,
+        1220,
         344
       ]
     },
@@ -156,7 +156,7 @@
     "summary.csv",
     "visits.csv"
   ],
-  "viewer_bytes": 4861662,
+  "viewer_bytes": 4861694,
   "replications": {
     "service_runs": [
       2.43697746671219,
@@ -184,6 +184,33 @@
     "service_lower": 1.7514635726521002,
     "service_upper": 3.1712863042275865,
     "runs": 20,
+    "checkin_runs": [
+      0.9429572534570437,
+      0.5215838979263022,
+      0.6469774742167931,
+      1.000046092890913,
+      1.2593603762419556,
+      0.49666750000665927,
+      0.85691725283891,
+      0.9699554358399138,
+      0.7743593874963839,
+      0.558593074555229,
+      0.7452293342013718,
+      0.6064984667164788,
+      0.7218764706910775,
+      1.0452705657683494,
+      0.5208020156432278,
+      0.9352894790245712,
+      0.5258286092329967,
+      0.8421154692757434,
+      1.09634691661849,
+      0.4999124170282304
+    ],
+    "checkin_interval": [
+      0.778329374483532,
+      0.6707529037332202,
+      0.8859058452338439
+    ],
     "confidence": 0.95,
     "seeds_distinct": 20
   },
@@ -275,19 +302,19 @@
       ]
     },
     "differences": {
-      "Two servers": [
-        -75.39456233933959,
-        -87.83629539146492,
-        -62.95282928721426
+      "One server": [
+        75.39456233933959,
+        62.95282928721426,
+        87.83629539146492
       ],
       "Three servers": [
-        -77.54068321508203,
-        -90.24074467984467,
-        -64.84062175031939
+        -2.1461208757424384,
+        -2.7716834036988023,
+        -1.5205583477860745
       ]
     },
     "baseline": [
-      "One server"
+      "Two servers"
     ]
   },
   "readme_blocks": {

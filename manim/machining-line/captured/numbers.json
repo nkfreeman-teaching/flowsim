@@ -1,6 +1,6 @@
 {
   "sources": {
-    "manim/machining-line/snippets/line.py": "37e26a198de08613c2fc340ddd35d9842337807f6d7e1d76550f4fe1e834c870",
+    "manim/machining-line/snippets/line.py": "8f0bfc2a5053ae85d0cd164662d100334b7de344ea25f2c1f8c316c52e5291ba",
     "examples/operations.py": "b6a12e6732cd0a7450c84a953220dcb95b87d31194ac9e16cc7d75a119a8c0f8"
   },
   "images": {
@@ -15,6 +15,13 @@
       "file": "gains.png",
       "size": [
         1084,
+        406
+      ]
+    },
+    "moved": {
+      "file": "moved.png",
+      "size": [
+        1102,
         406
       ]
     },
@@ -36,7 +43,7 @@
       "file": "comparison_means.png",
       "size": [
         1888,
-        1504
+        1416
       ]
     },
     "comparison_differences": {
@@ -180,6 +187,23 @@
       27.8,
       24.802860942996976,
       30.797139057003026
+    ]
+  },
+  "moved": {
+    "No buffers": [
+      -13.6,
+      -15.027655923463595,
+      -12.172344076536405
+    ],
+    "Five before Assembly": [
+      0.15,
+      -0.3598655797108684,
+      0.6598655797108685
+    ],
+    "Two each, no CNC failures": [
+      14.2,
+      10.538073543338026,
+      17.861926456661973
     ]
   },
   "stations": {
@@ -2440,5 +2464,9 @@
   ],
   "replications": [
     20
+  ],
+  "cnc_window": [
+    250,
+    400
   ]
 }

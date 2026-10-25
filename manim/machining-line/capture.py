@@ -26,6 +26,8 @@ from capture_tools import (  # noqa: E402
 )
 
 OUT = HERE / "captured"
+# Minutes of day 1 that the CNC resource chart shows.
+CNC_WINDOW = (250, 400)
 SNIPPETS = HERE / "snippets"
 STATION_METRICS = [
     "utilization",
@@ -50,6 +52,7 @@ def main():
     comparison = line["comparison"]
     record_image("output", frame_png(line["output"], OUT / "output.png"))
     record_image("gains", frame_png(line["gains"], OUT / "gains.png"))
+    record_image("moved", frame_png(line["moved"], OUT / "moved.png"))
     numbers["scenarios"] = list(comparison.experiments)
     numbers["completed"] = {
         name: column(experiment.summary.sort("replication"), "completed_at_close")
@@ -57,6 +60,7 @@ def main():
     }
     numbers["output"] = {row["scenario"]: [row["mean"], row["lower"], row["upper"]] for row in line["output"].to_dicts()}
     numbers["gains"] = {row["scenario"]: [row["mean"], row["lower"], row["upper"]] for row in line["gains"].to_dicts()}
+    numbers["moved"] = {row["scenario"]: [row["mean"], row["lower"], row["upper"]] for row in line["moved"].to_dicts()}
     numbers["stations"] = {}
     for name, experiment in comparison.experiments.items():
         table = experiment.stations.sort("replication")
@@ -75,6 +79,10 @@ def main():
         def choose(page, station=station):
             page.select_option("#station-choice", station)
             page.wait_for_timeout(400)
+            # CNC's chart shows a window where both down and blocked spans appear.
+            if station == "CNC":
+                page.evaluate(f"Plotly.relayout('resources', {{'xaxis.range': {list(CNC_WINDOW)}}})")
+                page.wait_for_timeout(400)
 
         record_image(
             f"resources_{station.lower()}",
@@ -83,6 +91,7 @@ def main():
     page = ROOT / "output" / "machining" / "comparison.html"
     for index, name in enumerate(["comparison_means", "comparison_differences"]):
         record_image(name, shoot(page, OUT / f"{name}.png", selector=f"section >> nth={index}", viewport=(1000, 900)))
+    numbers["cnc_window"] = list(CNC_WINDOW)
     write_numbers(OUT, numbers)
 
 

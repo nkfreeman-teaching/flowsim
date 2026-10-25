@@ -10,6 +10,15 @@ gains = comparison.differences(
     "lower",
     "upper",
 )
+moved = comparison.differences(
+    metric="completed_at_close",
+    baseline="Two each",
+).select(
+    "scenario",
+    "mean",
+    "lower",
+    "upper",
+)
 output = comparison.intervals(metric="completed_at_close").select(
     "scenario",
     "mean",

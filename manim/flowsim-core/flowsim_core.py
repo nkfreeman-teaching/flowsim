@@ -23,7 +23,9 @@ come from ../shared/explainer.py.
 """
 
 import ast
+import math
 import re
+import statistics
 from fractions import Fraction
 from pathlib import Path
 
@@ -63,6 +65,7 @@ from flowsim_video import (
     ROOT,
     CodeScene,
     SERVICE_ORANGE,
+    T95,
     WAIT_BLUE,
     call_keywords,
     close,
@@ -191,24 +194,38 @@ assert close(WAIT_MEAN, REPS["service_mean"], 1e-9)
 assert close(WAIT_LOWER, REPS["service_lower"], 1e-9)
 assert close(WAIT_UPPER, REPS["service_upper"], 1e-9)
 assert REPS["confidence"] == 0.95
+# The waits table also shows Check-in's interval.
+assert all(close(a, b, 1e-9) for a, b in zip(t_interval(REPS["checkin_runs"]), REPS["checkin_interval"]))
 
-# Paired comparison of one, two, and three Service servers (snippets/compare.py).
+# Paired comparison of one, two, and three Service servers against two (snippets/compare.py).
 COMPARE_SNIPPET = file_lines(SNIPPETS / "compare.py")
 COMPARED_SERVERS = [int(n) for n in re.findall(r"service_network\(service_capacity=(\d+)\)", "\n".join(COMPARE_SNIPPET))]
 assert COMPARED_SERVERS == [1, 2, 3]
+BASELINE = re.search(r'differences\(baseline="([^"]+)"\)', "\n".join(COMPARE_SNIPPET))[1]
+assert 'baseline="' + BASELINE + '",' in COMPARE_SNIPPET[-2]
 COMPARE = CAPTURED["compare"]
 SCENARIOS = list(COMPARE["runs"])
 assert SCENARIOS == ["One server", "Two servers", "Three servers"]
-assert COMPARE["same_seeds"] is True and COMPARE["baseline"] == ["One server"]
+assert COMPARE["same_seeds"] is True and COMPARE["baseline"] == [BASELINE] == ["Two servers"]
 MEANS = {}
 for name in SCENARIOS:
     MEANS[name] = t_interval(COMPARE["runs"][name])
     assert all(close(a, b, 1e-9) for a, b in zip(MEANS[name], COMPARE["means"][name]))
 DIFFERENCES = {}
-for name in SCENARIOS[1:]:
-    paired = [b - a for a, b in zip(COMPARE["runs"]["One server"], COMPARE["runs"][name])]
+for name in SCENARIOS:
+    if name == BASELINE:
+        continue
+    paired = [b - a for a, b in zip(COMPARE["runs"][BASELINE], COMPARE["runs"][name])]
     DIFFERENCES[name] = t_interval(paired)
     assert all(close(a, b, 1e-9) for a, b in zip(DIFFERENCES[name], COMPARE["differences"][name]))
+assert list(DIFFERENCES) == list(COMPARE["differences"])
+# The same runs treated as independent samples: a two-sample Student t interval with
+# 38 degrees of freedom. Both staffings see the same days, so pairing narrows it.
+_two, _three = COMPARE["runs"]["Two servers"], COMPARE["runs"]["Three servers"]
+UNPAIRED_HALF = T95[2 * DAYS - 2] * math.sqrt((statistics.variance(_two) + statistics.variance(_three)) / DAYS)
+PAIRED_HALF = (DIFFERENCES["Three servers"][2] - DIFFERENCES["Three servers"][1]) / 2
+assert PAIRED_HALF < UNPAIRED_HALF
+assert f"{UNPAIRED_HALF:.2f}" == "0.74" and f"{PAIRED_HALF:.2f}" == "0.63"
 # comparison.intervals() and differences() default to mean total wait, and differences()
 # subtracts the first named scenario (flowsim/comparison.py).
 _comparison = ast.parse((LIBRARY / "comparison.py").read_text())
@@ -220,8 +237,8 @@ for _node in ast.walk(_comparison):
         _defaults[_node.name] = {k: ast.literal_eval(v) for k, v in {**_positional, **_kwonly}.items() if v is not None}
 assert _defaults["intervals"]["metric"] == _defaults["differences"]["metric"] == "mean_total_wait"
 assert "self.baseline = next(iter(experiments))" in (LIBRARY / "comparison.py").read_text()
-# Two servers lower mean total wait on every day's pairing, so the interval sits below 0.
-assert DIFFERENCES["Two servers"][2] < 0
+# A third server lowers mean total wait, and its whole interval sits below 0.
+assert DIFFERENCES["Three servers"][2] < 0
 
 # The extension tour quotes README blocks that capture.py ran (load_captured checked
 # that each block is unchanged since).
@@ -740,24 +757,28 @@ class Part6Compare(CoreScene):
         self.say("intervals() reports mean total wait by default. Total wait adds a customer's waits at both stations.")
         table = self.code_and_table(lines, "manim/flowsim-core/snippets/compare.py", HERE, CAPTURED, "means", size=20, max_width=7.5)
         self.pause("means")
-        one, two = MEANS["One server"][0], MEANS["Two servers"][0]
-        self.say(f"One server averages {one:.1f} minutes of total wait, and two servers {two:.1f}.")
+        one, two, three = (MEANS[name][0] for name in SCENARIOS)
+        self.say(f"One server averages {one:.1f} minutes of total wait. Two servers average {two:.1f}, three {three:.1f}.")
         self.pause("means-read")
 
-        lines = code_lines_of(compare_lines, "paired = comparison.differences().select(", 7)
-        self.say(f"differences subtracts the first scenario, {SCENARIOS[0]}, within each day. baseline= names another.")
+        lines = code_lines_of(compare_lines, f'paired = comparison.differences(baseline="{BASELINE}").select(', 7)
+        self.say(f"differences subtracts the baseline, {BASELINE}, within each day. Without baseline=, it uses the first scenario.")
         table = self.code_and_table(lines, "manim/flowsim-core/snippets/compare.py", HERE, CAPTURED, "paired", size=20, max_width=9.5, drop=(table,))
         self.pause("paired")
-        self.say("A negative difference means less waiting than with one server.")
+        self.say("A negative difference means less waiting than with two servers.")
         self.pause("pairing")
-        mean, lower, upper = DIFFERENCES["Two servers"]
+        mean, lower, upper = DIFFERENCES["Three servers"]
         self.say(
-            f"Two servers change mean total wait by {signed(mean)} minutes. "
+            f"A third server changes mean total wait by {signed(mean)} minutes. "
             f"The {REPS['confidence']:.0%} CI is {signed(lower)} to {signed(upper)}.",
         )
         self.pause("paired-read")
+        self.say("Both staffings see the same busy and quiet days. Pairing cancels that shared noise.")
+        self.pause("shared-days")
+        self.say(f"Unpaired, these runs give a CI half-width of {UNPAIRED_HALF:.2f} minutes. Pairing narrows it to {PAIRED_HALF:.2f}.")
+        self.pause("paired-width")
 
-        self.say(f"comparison.viewer saves these intervals as one offline page. Both rows compare with {SCENARIOS[0]}, not with each other.")
+        self.say(f"comparison.viewer saves these intervals as one offline page. Both rows compare with {BASELINE}, not with each other.")
         self.clear_stage()
         self.panel = None
         self.band = None

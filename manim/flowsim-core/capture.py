@@ -130,17 +130,22 @@ def main():
     full = experiment.intervals("mean_wait")
     service = full.filter(pl.col("station") == "Service").row(0, named=True)
     per_run = experiment.stations.filter(pl.col("station") == "Service").sort("replication")
+    # The waits table also shows Check-in's interval, so its runs are recorded too.
+    checkin = full.filter(pl.col("station") == "Check-in").row(0, named=True)
+    checkin_runs = experiment.stations.filter(pl.col("station") == "Check-in").sort("replication")
     numbers["replications"] = {
         "service_runs": column(per_run, "mean_wait"),
         "service_mean": service["mean"],
         "service_lower": service["lower"],
         "service_upper": service["upper"],
         "runs": service["runs"],
+        "checkin_runs": column(checkin_runs, "mean_wait"),
+        "checkin_interval": [checkin["mean"], checkin["lower"], checkin["upper"]],
         "confidence": service["confidence"],
         "seeds_distinct": len({run.seed for run in experiment.runs}),
     }
 
-    # Paired comparison of one, two, and three Service servers.
+    # Paired comparison of one, two, and three Service servers, against two.
     paired, _ = run_snippet(SNIPPETS / "compare.py")
     comparison = paired["comparison"]
     record_image("means", frame_png(paired["means"], OUT / "means.png"))

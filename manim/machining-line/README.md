@@ -8,11 +8,11 @@ from the project root).
 | Scene | Part | Starts at slide | Source |
 |---|---|---|---|
 | `Part1Line` | Draws the five-station line (plus a source) and reads the blank release and the saw's zero buffer from the code | 1 | `examples/operations.py` (`machining_line`), README "A saturated machining line" |
-| `Part2Capacity` | Computes rough capacity per station, then adds the lunch staffing and the CNC failures, with the saved viewer's resource charts | 10 | `examples/operations.py`, `snippets/line.py` |
-| `Part3Buffers` | Compares the buffer plans by parts per shift and by CNC blocking, with the paired gains table | 21 | `examples/operations.py` (`BUFFER_PLANS`, `line_study`), `snippets/line.py` |
-| `Part4Failures` | Adds the no-failure scenario, the CNC down share, and the saved comparison viewer | 28 | `snippets/line.py`, README "A saturated machining line" |
+| `Part2Capacity` | Computes rough capacity per station, then adds the lunch staffing and the CNC failures, with the saved viewer's resource charts | 11 | `examples/operations.py`, `snippets/line.py` |
+| `Part3Buffers` | Compares the buffer plans by parts per shift and by CNC blocking, with the relocation and paired gains tables | 22 | `examples/operations.py` (`BUFFER_PLANS`, `line_study`), `snippets/line.py` |
+| `Part4Failures` | Adds the no-failure scenario, the CNC down share, and the saved comparison viewer | 30 | `snippets/line.py`, README "A saturated machining line" |
 
-The deck has 32 slides. The slide numbers change if a part gains or loses a break. Every displayed number is
+The deck has 34 slides. The slide numbers change if a part gains or loses a break. Every displayed number is
 asserted against the sources above when the module is imported.
 
 ## Plan
@@ -30,7 +30,7 @@ approved before the build.
 | `lambda rng:` | A function FlowSim calls with the run's random generator to draw each time (the saw takes 2.5 to 3.5 minutes) | examples/operations.py | 1 |
 | buffer | The waiting spaces in front of a station, apart from its servers | README "Finite buffers and blocking" | 1 |
 | `external_overflow="wait"`, raw stock | Released blanks that find the saw busy wait outside the line | README "A saturated machining line" | 1 |
-| saturated | The line never runs out of blanks, so its output measures capacity | README "A saturated machining line" | 1 |
+| saturated | The line never runs out of blanks, so its output measures one shift's output from an empty line | README "A saturated machining line" | 1 |
 | `completed_at_close` | Parts finished by the end of the 480-minute shift, starting from an empty line | README metric table | 1 |
 | rough capacity | Shift minutes times average servers divided by mean minutes per part, ignoring variability and blocking | computed here, not stated in the README | 2 |
 | bottleneck | The station with the lowest rough capacity | README "A saturated machining line" | 2 |
@@ -49,9 +49,9 @@ Numbers come from `captured/numbers.json`, which `capture.py` writes by running
 
 | Scene | Shows | Numbers and their check | Breaks |
 |---|---|---|---|
-| `Part1Line` | The five-station line (plus a source) drawn, and the blanks source and saw read from `machining_line` | release every 2 minutes, saw buffer 0 (parsed from `examples/operations.py`); 240 blanks per shift (computed); saw occupied all shift (captured utilization, asserted at least 0.999) | after the line, the release, the buffer, raw stock, and the output measure |
-| `Part2Capacity` | A bar chart of rough capacity per station, then the lunch staffing and the CNC failures read from the code, with the saved viewer's resource charts | each station's mean time (parsed); 1.875 average fitters (computed from the staffing list and asserted against the captured `mean_scheduled_servers`); CNC 6 × (1 + 20/90) minutes per part and about 131 parts (computed) | after the chart, lunch, the fitters chart, each failure step, the CNC chart, the lunch-adjusted chart, and the CNC cost |
-| `Part3Buffers` | `BUFFER_PLANS`, an interval chart of parts per shift by plan, the CNC blocked share by plan, and the paired gains table | plan means and 95% limits (recomputed from 20 runs and asserted); the gain over no buffers (paired, recomputed, asserted, and checked against README "more than ten"); the move to assembly (paired, checked against README "less than one part"); CNC blocked share (mean of captured run values) | after the plans, blocking, each chart step, and the table |
+| `Part1Line` | The five-station line (plus a source) drawn, and the blanks source and saw read from `machining_line` | release every 2 minutes, saw buffer 0 (parsed from `examples/operations.py`); 240 blanks per shift (computed); saw occupied all shift (captured utilization, asserted at least 0.999); one routing with no rework (README "every blank follows the same routing" and "rework loops are not implemented", and one `route` call with no `branch` in `machining_line`) | after the line, the station, the routing, the release, the buffer, raw stock, and the output measure |
+| `Part2Capacity` | A bar chart of rough capacity per station, then the lunch staffing and the CNC failures read from the code, with the saved viewer's resource charts | each station's mean time (parsed); 1.875 average fitters (computed from the staffing list and asserted against the captured `mean_scheduled_servers`); CNC 6 × (1 + 20/90) minutes per part and about 131 parts (computed); the CNC chart's minutes 250 to 400 (set in `capture.py` and read from the capture) | after the chart, lunch, the fitters chart, each failure step, the CNC chart, the lunch-adjusted chart, and the CNC cost |
+| `Part3Buffers` | `BUFFER_PLANS`, an interval chart of parts per shift by plan, the CNC blocked share by plan, and the paired gains table | plan means and 95% limits (recomputed from 20 runs and asserted); the gain over no buffers (paired, recomputed, asserted, and checked against README "more than ten"); the move to assembly (paired, recomputed, asserted against FlowSim's `differences(baseline="Two each")` table, and checked against README "less than one part"); CNC blocked share (mean of captured run values) | after the plans, blocking, each chart step, the relocation table, and the gains table |
 | `Part4Failures` | The no-failure scenario added to the chart, the CNC down share, and the saved comparison viewer | the no-failure gain over two each (paired, recomputed, and checked against README "about as many parts again"); CNC down share (mean of captured run values) | after the added row, the comparison, the down share, and the viewer |
 
 Decision taken in the plan: the rough capacity chart is this video's own hand calculation
@@ -126,6 +126,12 @@ disposition. Finding numbers are Codex's. Findings 1, 2, and 46 span all four vi
 | R2 P10 | Ragged baselines on axis labels look careless, which is the same defect I1-I23 fixed in the core video only. | Accepted. Tick labels and the amplification legend top-aligned; the job and ratio columns bottom-aligned. |
 | R2 P12 | The ≈ glyph renders with a visibly double space on each side, unlike the source text. | Accepted. 'A 6-minute part costs 6 × (1 + 20/90), about 7.3 machine-minutes.' |
 
-After these changes, `check` passed for all four videos, every part was re-rendered at final quality, the final sheets were read again, and `check_deck.py` was rerun.
+| Owner | completed_at_close "measures capacity" overstated it, since each shift starts empty (I1-Q2, I2-Q2). | Done. The caption says "It measures one shift's output from an empty line", and the project README now says the same. |
+| Owner | State that every blank follows one routing with no scrap or rework (P2-Q2). | Done. A Part 1 caption, asserted against the README and the model code. |
+| Owner | The relocation interval came from the scene's own t interval (R2 I9). | Done. `snippets/line.py` adds `differences(baseline="Two each")`; Part 3 shows its table, and the scene asserts its intervals against it. |
+| Owner | The CNC resource chart was too dense to read (R2 I10). | Done. `capture.py` zooms it to minutes 250 to 400, and the caption names the window. |
+| Owner | The comparison viewer called parts "customers" twice, in the label and in the unit (S1-Q1, P1-Q2, I1-Q3). | Done in part. `flowsim/results.py` now gives counts the unit "count"; the label keeps FlowSim's word "customers", which Part 1 defines as one blank. |
+
+After the round 2 changes, `check` passed for all four videos, every part was re-rendered at final quality, the final sheets were read again, and `check_deck.py` was rerun. The owner rows were answered after the loop; their check renders passed, and the closing checkpoint read them.
 
 Rows marked R1 and R2 come from rounds 1 and 2 of the review loop in `review-loop/2026-10-24-flowsim-teaching-videos/` (snapshots a6e233f0cd1d and b951369bd929), whose ids are the reviewers' (S student, I instructor, P practitioner, C Codex correctness). The loop's `progress.md` records each verification.
