@@ -77,7 +77,9 @@ folder from the terminal.
 mkdir ~/OM522
 ```
 
-Then move the project folder from step 2 into `OM522` and rename it `flowsim`.
+If `OM522` already exists from an earlier meeting, `mkdir` reports an error that
+can be ignored. Then move the project folder from step 2 into `OM522` and rename
+it `flowsim`.
 
 - **macOS.** In Finder, choose **Go > Home** (Shift-Command-H), open `OM522`,
   and drag the `flowsim-main` folder from Downloads into it. Select the folder,
@@ -161,8 +163,9 @@ the service day video shows, i.e., day 1 with one server
 
 To update FlowSim, download a new ZIP, replace the `flowsim` folder as in steps
 2 and 3, and run `pixi install` again. The tasks regenerate everything under
-`output/`. Readers who use git can instead clone the repository into the same
-place and update it later with `git pull`.
+`output/`. Readers who use git can instead delete the ZIP copy of the `flowsim`
+folder, clone the repository into the same place, and update it later with
+`git pull`.
 
 ```bash
 git clone https://github.com/nkfreeman-teaching/flowsim ~/OM522/flowsim
