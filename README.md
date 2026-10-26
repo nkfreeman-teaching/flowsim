@@ -171,6 +171,31 @@ folder, clone the repository into the same place, and update it later with
 git clone https://github.com/nkfreeman-teaching/flowsim ~/OM522/flowsim
 ```
 
+### Using FlowSim in another project
+
+Another Pixi project can use the FlowSim folder as a dependency, without a
+second copy of the library. These commands create a project at
+`~/OM522/project1` (any name works) and add FlowSim by the relative path
+`../flowsim`, which reaches the FlowSim folder on every machine because both
+folders sit inside `OM522`.
+
+```bash
+mkdir ~/OM522/project1
+cd ~/OM522/project1
+pixi init
+pixi add "python>=3.12,<3.14"
+pixi add --pypi --editable "classroom-flowsim @ ../flowsim"
+```
+
+The package is named `classroom-flowsim`, and the project imports it with
+`import flowsim`. FlowSim's package dependencies (NumPy, Polars, NetworkX,
+Plotly, and SciPy) install with it, but Marimo does not, so a project that uses
+notebooks also runs `pixi add marimo`. Pixi does not expand `~` in a dependency
+path, so the path is either relative, as above, or a full path such as
+`/Users/<name>/OM522/flowsim`. The install is editable (i.e., the project reads
+the code in `~/OM522/flowsim` rather than a copy), so updating FlowSim as above
+also updates every project that uses it.
+
 ### Tasks
 
 The repository defines these tasks:
