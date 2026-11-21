@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from operator import attrgetter
 
 import polars as pl
 
@@ -310,12 +311,44 @@ def _frame(records: list, schema: dict[str, pl.DataType]) -> pl.DataFrame:
     Polars would match dataclass fields to the schema by position and cast
     mismatches silently, so the columns are gathered by name instead.
     """
+    if not records:
+        return pl.DataFrame(schema=schema)
     return pl.DataFrame(
-        data={
-            column: [getattr(record, column) for record in records] for column in schema
-        },
+        data={column: list(map(attrgetter(column), records)) for column in schema},
         schema=schema,
     )
+
+
+_SUMMARY_TYPES = {
+    "arrivals": pl.Int64,
+    "admitted": pl.Int64,
+    "admitted_at_close": pl.Int64,
+    "outside_at_close": pl.Int64,
+    "rejected": pl.Int64,
+    "abandoned": pl.Int64,
+    "completed": pl.Int64,
+    "remaining": pl.Int64,
+    "completed_at_close": pl.Int64,
+    "remaining_at_close": pl.Int64,
+    "after_close_completions": pl.Int64,
+    "end_time": pl.Float64,
+    "overtime": pl.Float64,
+    "measurement_arrivals": pl.Int64,
+    "measurement_rejected": pl.Int64,
+    "measurement_abandoned": pl.Int64,
+    "abandonment_rate": pl.Float64,
+    "measurement_admitted": pl.Int64,
+    "cohort_arrivals": pl.Int64,
+    "measurement_completions": pl.Int64,
+    "cohort_completions": pl.Int64,
+    "cohort_remaining": pl.Int64,
+    "mean_flow_time": pl.Float64,
+    "mean_total_wait": pl.Float64,
+    "mean_total_blocked": pl.Float64,
+    "mean_outside_wait": pl.Float64,
+    "throughput": pl.Float64,
+    "mean_wip": pl.Float64,
+}
 
 
 # Display order of the stations and summary tables: the headline columns come
@@ -348,6 +381,11 @@ def headline_first(columns: list[str], headline: list[str]) -> list[str]:
 STATION_SCHEMA = {
     column: _STATION_TYPES[column]
     for column in headline_first(list(_STATION_TYPES), STATION_HEADLINE)
+}
+
+SUMMARY_SCHEMA = {
+    column: _SUMMARY_TYPES[column]
+    for column in headline_first(list(_SUMMARY_TYPES), SUMMARY_HEADLINE)
 }
 
 

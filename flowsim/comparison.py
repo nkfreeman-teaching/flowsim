@@ -68,19 +68,40 @@ class Comparison:
     experiments: dict[str, Experiment]
     baseline: str
 
-    def __init__(self, experiments: dict[str, Experiment]):
+    def __init__(self, experiments: Mapping[str, Experiment]):
+        if not isinstance(experiments, Mapping):
+            raise ValueError("experiments must be a mapping from scenario names.")
         if len(experiments) < 2:
             raise ValueError("A comparison needs at least two experiments.")
-        self.experiments = experiments
-        self.baseline = next(iter(experiments))
-        first = experiments[self.baseline].runs[0]
+        validated: dict[str, Experiment] = {}
+        for name, experiment in experiments.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("Scenario names must be nonempty strings.")
+            if not isinstance(experiment, Experiment):
+                raise ValueError(
+                    f"Scenario {name!r} must be an Experiment, not {experiment!r}."
+                )
+            validated[name] = experiment
+        self.experiments = validated
+        self.baseline = next(iter(validated))
+        first_exp = validated[self.baseline]
+        first = first_exp.runs[0]
         if any(
             _run_settings(experiment.runs[0]) != _run_settings(first)
-            for experiment in experiments.values()
+            for experiment in validated.values()
         ):
             raise ValueError(
                 "Compared scenarios need the same duration, warm-up, drain rule, "
                 "and time unit."
+            )
+        expected_seeds = [run.settings.seed for run in first_exp.runs]
+        if any(
+            [run.settings.seed for run in experiment.runs] != expected_seeds
+            for experiment in validated.values()
+        ):
+            raise ValueError(
+                "Compared scenarios need identical replication seeds to pair "
+                "differences."
             )
 
     def __getattr__(self, name: str) -> object:

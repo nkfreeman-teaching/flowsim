@@ -48,7 +48,7 @@ from flowsim.records import (
     STATE_SCHEMA,
     STATION_SCHEMA,
     STOCK_POINT_SCHEMA,
-    SUMMARY_HEADLINE,
+    SUMMARY_SCHEMA,
     VISIT_SCHEMA,
     Status,
     _Activity,
@@ -59,7 +59,6 @@ from flowsim.records import (
     _Shipment,
     _State,
     _Visit,
-    headline_first,
 )
 from flowsim.reporting import (
     dashboard,
@@ -206,8 +205,12 @@ def stack(
     column: str,
 ) -> pl.DataFrame:
     """Stack labeled tables, with each table's label in a new first column."""
-    return pl.concat(
-        [table.select(pl.lit(value).alias(column), pl.all()) for value, table in parts]
+    items = list(parts)
+    stacked = pl.concat([table for _, table in items])
+    labels = [value for value, table in items for _ in range(table.height)]
+    return stacked.with_columns(pl.Series(name=column, values=labels)).select(
+        column,
+        pl.exclude(column),
     )
 
 
@@ -419,16 +422,23 @@ class Results:
         warmup: float,
         time_unit: str,
         seed: int,
-        graph: nx.DiGraph,
+        graph: nx.DiGraph | None,
         definition: tuple,
+        *,
+        keep_records: bool = True,
     ):
-        self.customers = _frame(customers, CUSTOMER_SCHEMA)
-        self.visits = _frame(visits, VISIT_SCHEMA)
-        self.states = _frame(states, STATE_SCHEMA)
-        self.activities = _frame(activities, ACTIVITY_SCHEMA)
-        self.failures = _frame(failures, FAILURE_SCHEMA)
-        self.inventory = _frame(inventory, INVENTORY_SCHEMA)
-        self.shipments = _frame(shipments, SHIPMENT_SCHEMA)
+        customers_df = _frame(customers, CUSTOMER_SCHEMA)
+        visits_df = _frame(visits, VISIT_SCHEMA)
+        states_df = _frame(states, STATE_SCHEMA)
+        inventory_df = _frame(inventory, INVENTORY_SCHEMA)
+        if keep_records:
+            self.customers = customers_df
+            self.visits = visits_df
+            self.states = states_df
+            self.activities = _frame(activities, ACTIVITY_SCHEMA)
+            self.failures = _frame(failures, FAILURE_SCHEMA)
+            self.inventory = inventory_df
+            self.shipments = _frame(shipments, SHIPMENT_SCHEMA)
         self.settings = Settings(
             duration=duration,
             warmup=warmup,
@@ -444,20 +454,76 @@ class Results:
         # failures, which decides whether a run view draws server states.
         self._resources_vary = resources_vary
         self._closing_states = closing_states
-        self._graph = graph.copy()
+        self._graph = graph.copy() if keep_records and graph is not None else None
         # Experiment pools only runs whose model definitions match.
         self._definition = definition
-        self.stations = self._station_metrics()
-        self.summary = self._system_metrics()
-        self.stock_points = self._stock_point_metrics()
+        self.stations = self._station_metrics(visits_df, states_df)
+        self.summary = self._system_metrics(customers_df)
+        self.stock_points = self._stock_point_metrics(inventory_df)
 
-    def _station_areas(self) -> pl.DataFrame:
-        """Integrate each station's state counts over [warmup, duration).
+    def _station_metrics(
+        self,
+        visits_df: pl.DataFrame,
+        states_df: pl.DataFrame,
+    ) -> pl.DataFrame:
+        # Only a comparison's shared settings hold no capacities.
+        capacities = self.settings.capacities
+        assert capacities is not None
+        if not capacities:
+            return pl.DataFrame(schema=STATION_SCHEMA)
+        window = self.settings.duration - self.settings.warmup
+        # Utilization is server*time / (servers*time), dimensionless.
+        installed = pl.col("capacity") * window
+        names = list(capacities)
+        closing_rows = [self._closing_states[name] for name in names]
+        base = pl.DataFrame(
+            data={
+                "station": names,
+                "capacity": list(capacities.values()),
+                "waiting_at_close": [row.waiting for row in closing_rows],
+                "occupied_at_close": [row.busy for row in closing_rows],
+                "blocked_at_close": [row.blocked for row in closing_rows],
+                "paused_at_close": [row.paused for row in closing_rows],
+                "outside_at_close": [row.outside for row in closing_rows],
+            },
+            schema={
+                "station": pl.String,
+                "capacity": pl.Int64,
+                "waiting_at_close": pl.Int64,
+                "occupied_at_close": pl.Int64,
+                "blocked_at_close": pl.Int64,
+                "paused_at_close": pl.Int64,
+                "outside_at_close": pl.Int64,
+            },
+        )
 
-        A state row holds until the station's next row, so its width is the
-        part of that span inside the window. Areas have units customer*time
-        and server*time. The largest queue counts only rows with positive width.
-        """
+        def in_window(column: str) -> pl.Expr:
+            return pl.col(column).is_between(
+                lower_bound=self.settings.warmup,
+                upper_bound=self.settings.duration,
+                closed="left",
+            )
+
+        # Waits belong to station arrivals at or after warm-up, with no upper
+        # bound, so drained runs include arrivals after closing.
+        cohort = pl.col("arrival_time") >= self.settings.warmup
+        waits = pl.col("wait_time").filter(cohort)
+        visits = (
+            visits_df.lazy()
+            .group_by("station")
+            .agg(
+                in_window("arrival_time").sum().alias("arrivals"),
+                cohort.sum().alias("wait_arrivals"),
+                in_window("service_start").sum().alias("service_starts"),
+                in_window("service_end").sum().alias("service_completions"),
+                waits.count().alias("wait_observations"),
+                waits.mean().alias("mean_wait"),
+                waits.quantile(
+                    quantile=0.95,
+                    interpolation="linear",
+                ).alias("p95_wait"),
+            )
+        )
         width = (
             (
                 pl.col("time")
@@ -469,8 +535,9 @@ class Results:
             .clip(lower_bound=0)
             .fill_null(0)
         )
-        return (
-            self.states.with_columns(width.alias("width"))
+        state_agg = (
+            states_df.lazy()
+            .with_columns(width.alias("width"))
             .group_by(
                 "station",
                 maintain_order=True,
@@ -485,49 +552,9 @@ class Results:
                 .max()
                 .fill_null(0)
                 .alias("max_queue"),
+                pl.col("waiting").last().alias("waiting_at_end"),
+                pl.col("busy").last().alias("occupied_at_end"),
             )
-        )
-
-    def _station_counts(self) -> pl.DataFrame:
-        """Count each station's visits in the window and its closing states."""
-
-        def in_window(column: str) -> pl.Expr:
-            return pl.col(column).is_between(
-                lower_bound=self.settings.warmup,
-                upper_bound=self.settings.duration,
-                closed="left",
-            )
-
-        # Waits belong to station arrivals at or after warm-up, with no upper
-        # bound, so drained runs include arrivals after closing.
-        cohort = pl.col("arrival_time") >= self.settings.warmup
-        waits = pl.col("wait_time").filter(cohort)
-        visits = self.visits.group_by("station").agg(
-            in_window("arrival_time").sum().alias("arrivals"),
-            cohort.sum().alias("wait_arrivals"),
-            in_window("service_start").sum().alias("service_starts"),
-            in_window("service_end").sum().alias("service_completions"),
-            waits.count().alias("wait_observations"),
-            waits.mean().alias("mean_wait"),
-            waits.quantile(
-                quantile=0.95,
-                interpolation="linear",
-            ).alias("p95_wait"),
-        )
-        closing = _frame(list(self._closing_states.values()), STATE_SCHEMA).select(
-            "station",
-            pl.col("waiting").alias("waiting_at_close"),
-            pl.col("busy").alias("occupied_at_close"),
-            pl.col("blocked").alias("blocked_at_close"),
-            pl.col("paused").alias("paused_at_close"),
-            pl.col("outside").alias("outside_at_close"),
-        )
-        final = self.states.group_by(
-            "station",
-            maintain_order=True,
-        ).agg(
-            pl.col("waiting").last().alias("waiting_at_end"),
-            pl.col("busy").last().alias("occupied_at_end"),
         )
         counts = [
             "arrivals",
@@ -538,70 +565,57 @@ class Results:
         ]
         # A station no customer visited has zero counts and no waits.
         return (
-            closing.join(
+            base.lazy()
+            .join(
                 other=visits,
                 on="station",
                 how="left",
                 maintain_order="left",
             )
             .join(
-                other=final,
+                other=state_agg,
                 on="station",
                 how="left",
                 maintain_order="left",
             )
-            .with_columns(pl.col(counts).fill_null(0))
+            .with_columns(
+                pl.col(counts).fill_null(0),
+                (pl.col("waiting_area") / window).alias("mean_queue"),
+                (pl.col("busy_area") / installed).alias("utilization"),
+                (pl.col("processing_area") / installed).alias("processing_utilization"),
+                (pl.col("blocked_area") / installed).alias("blocking_fraction"),
+                (pl.col("down_area") / installed).alias("downtime_fraction"),
+                (pl.col("scheduled_area") / window).alias("mean_scheduled_servers"),
+                (pl.col("available_area") / window).alias("mean_available_servers"),
+                (pl.col("outside_area") / window).alias("mean_outside_queue"),
+                pl.when(pl.col("available_area") == 0)
+                .then(None)
+                .otherwise(pl.col("processing_area") / pl.col("available_area"))
+                .alias("staffed_utilization"),
+            )
+            .select(
+                [pl.col(column).cast(dtype) for column, dtype in STATION_SCHEMA.items()]
+            )
+            .collect()
         )
 
-    def _station_metrics(self) -> pl.DataFrame:
-        window = self.settings.duration - self.settings.warmup
-        # Utilization is server*time / (servers*time), dimensionless.
-        installed = pl.col("capacity") * window
-        # Only a comparison's shared settings hold no capacities.
-        capacities = self.settings.capacities
-        assert capacities is not None
-        stations = (
-            pl.DataFrame(
-                data={
-                    "station": list(capacities),
-                    "capacity": list(capacities.values()),
-                },
-                schema={"station": pl.String, "capacity": pl.Int64},
-            )
-            .join(
-                other=self._station_counts(),
-                on="station",
-                how="left",
-                maintain_order="left",
-            )
-            .join(
-                other=self._station_areas(),
-                on="station",
-                how="left",
-                maintain_order="left",
-            )
-        )
-        return stations.with_columns(
-            (pl.col("waiting_area") / window).alias("mean_queue"),
-            (pl.col("busy_area") / installed).alias("utilization"),
-            (pl.col("processing_area") / installed).alias("processing_utilization"),
-            (pl.col("blocked_area") / installed).alias("blocking_fraction"),
-            (pl.col("down_area") / installed).alias("downtime_fraction"),
-            (pl.col("scheduled_area") / window).alias("mean_scheduled_servers"),
-            (pl.col("available_area") / window).alias("mean_available_servers"),
-            (pl.col("outside_area") / window).alias("mean_outside_queue"),
-            pl.when(pl.col("available_area") == 0)
-            .then(None)
-            .otherwise(pl.col("processing_area") / pl.col("available_area"))
-            .alias("staffed_utilization"),
-        ).select(
-            [pl.col(column).cast(dtype) for column, dtype in STATION_SCHEMA.items()]
-        )
-
-    def _system_metrics(self) -> pl.DataFrame:
+    def _system_metrics(self, customers_df: pl.DataFrame) -> pl.DataFrame:
+        # A run's settings always record its end time.
+        end_time = self.settings.end_time
+        assert end_time is not None
+        duration = self.settings.duration
+        if customers_df.is_empty():
+            empty: dict[str, list[object]] = {
+                column: [0] if dtype == pl.Int64 else [None]
+                for column, dtype in SUMMARY_SCHEMA.items()
+            }
+            empty["end_time"] = [end_time]
+            empty["overtime"] = [end_time - duration]
+            empty["throughput"] = [0.0]
+            empty["mean_wip"] = [0.0]
+            return pl.DataFrame(data=empty, schema=SUMMARY_SCHEMA)
         # One query over the customers table gives every count.
         warmup = self.settings.warmup
-        duration = self.settings.duration
         status = pl.col("status")
         eligible = status != Status.REJECTED
         cohort = eligible & (pl.col("arrival_time") >= warmup)
@@ -618,7 +632,7 @@ class Results:
             .clip(upper_bound=duration)
             - admission.clip(lower_bound=warmup)
         ).clip(lower_bound=0)
-        counts = self.customers.select(
+        counts = customers_df.select(
             pl.len().alias("arrivals"),
             pl.col("admitted").sum().alias("admitted"),
             (inside & (admission < duration)).sum().alias("admitted_at_close"),
@@ -657,71 +671,62 @@ class Results:
         ).row(0, named=True)
         # Float sums and means stay on filtered frames, as before, since a
         # filtered expression can sum in a different order (last-bit changes).
-        done = self.customers.filter(finished)
+        done = customers_df.filter(finished)
         for column in ["flow_time", "total_wait", "total_blocked", "outside_wait"]:
             counts[f"mean_{column}"] = done.get_column(column).mean()
-        counts["presence"] = self.customers.filter(inside).select(presence.sum()).item()
+        counts["presence"] = customers_df.filter(inside).select(presence.sum()).item()
         window = duration - warmup
         rejected = counts["arrivals"] - counts["eligible"]
-        # A run's settings always record its end time.
-        end_time = self.settings.end_time
-        assert end_time is not None
-        summary = pl.DataFrame(
-            {
-                "arrivals": [counts["arrivals"]],
-                "admitted": [counts["admitted"]],
-                "admitted_at_close": [counts["admitted_at_close"]],
-                "outside_at_close": [counts["outside_at_close"]],
-                "rejected": [rejected],
-                "abandoned": [counts["abandoned"]],
-                "completed": [counts["completed"]],
-                "remaining": [
-                    counts["eligible"] - counts["completed"] - counts["abandoned"]
-                ],
-                "completed_at_close": [counts["completed_at_close"]],
-                "remaining_at_close": [
-                    counts["eligible"]
-                    - counts["completed_at_close"]
-                    - counts["abandoned_at_close"]
-                ],
-                "after_close_completions": [
-                    counts["completed"] - counts["completed_at_close"]
-                ],
-                "end_time": [end_time],
-                "overtime": [end_time - duration],
-                "measurement_arrivals": [counts["measurement_arrivals"]],
-                "measurement_rejected": [counts["measurement_rejected"]],
-                "measurement_abandoned": [counts["measurement_abandoned"]],
-                "abandonment_rate": [
-                    counts["cohort_abandoned"] / counts["measurement_arrivals"]
-                    if counts["measurement_arrivals"]
-                    else None
-                ],
-                "measurement_admitted": [counts["measurement_admitted"]],
-                "cohort_arrivals": [counts["cohort"]],
-                "measurement_completions": [counts["exits"]],
-                "cohort_completions": [counts["finished"]],
-                "cohort_remaining": [
-                    counts["cohort"] - counts["finished"] - counts["cohort_abandoned"]
-                ],
-                "mean_flow_time": [counts["mean_flow_time"]],
-                "mean_total_wait": [counts["mean_total_wait"]],
-                "mean_total_blocked": [counts["mean_total_blocked"]],
-                "mean_outside_wait": [counts["mean_outside_wait"]],
-                "throughput": [counts["exits"] / window],
-                "mean_wip": [counts["presence"] / window],
-            },
-            schema_overrides={
-                "abandonment_rate": pl.Float64,
-                "mean_flow_time": pl.Float64,
-                "mean_total_wait": pl.Float64,
-                "mean_total_blocked": pl.Float64,
-                "mean_outside_wait": pl.Float64,
-            },
+        values = {
+            "arrivals": [counts["arrivals"]],
+            "admitted": [counts["admitted"]],
+            "admitted_at_close": [counts["admitted_at_close"]],
+            "outside_at_close": [counts["outside_at_close"]],
+            "rejected": [rejected],
+            "abandoned": [counts["abandoned"]],
+            "completed": [counts["completed"]],
+            "remaining": [
+                counts["eligible"] - counts["completed"] - counts["abandoned"]
+            ],
+            "completed_at_close": [counts["completed_at_close"]],
+            "remaining_at_close": [
+                counts["eligible"]
+                - counts["completed_at_close"]
+                - counts["abandoned_at_close"]
+            ],
+            "after_close_completions": [
+                counts["completed"] - counts["completed_at_close"]
+            ],
+            "end_time": [end_time],
+            "overtime": [end_time - duration],
+            "measurement_arrivals": [counts["measurement_arrivals"]],
+            "measurement_rejected": [counts["measurement_rejected"]],
+            "measurement_abandoned": [counts["measurement_abandoned"]],
+            "abandonment_rate": [
+                counts["cohort_abandoned"] / counts["measurement_arrivals"]
+                if counts["measurement_arrivals"]
+                else None
+            ],
+            "measurement_admitted": [counts["measurement_admitted"]],
+            "cohort_arrivals": [counts["cohort"]],
+            "measurement_completions": [counts["exits"]],
+            "cohort_completions": [counts["finished"]],
+            "cohort_remaining": [
+                counts["cohort"] - counts["finished"] - counts["cohort_abandoned"]
+            ],
+            "mean_flow_time": [counts["mean_flow_time"]],
+            "mean_total_wait": [counts["mean_total_wait"]],
+            "mean_total_blocked": [counts["mean_total_blocked"]],
+            "mean_outside_wait": [counts["mean_outside_wait"]],
+            "throughput": [counts["exits"] / window],
+            "mean_wip": [counts["presence"] / window],
+        }
+        return pl.DataFrame(
+            data={column: values[column] for column in SUMMARY_SCHEMA},
+            schema=SUMMARY_SCHEMA,
         )
-        return summary.select(headline_first(summary.columns, SUMMARY_HEADLINE))
 
-    def _stock_point_metrics(self) -> pl.DataFrame:
+    def _stock_point_metrics(self, inventory_df: pl.DataFrame) -> pl.DataFrame:
         """Summarize each stock point over the review periods in [warmup, duration).
 
         Means of on-hand stock and backorders average end-of-period values. The
@@ -733,24 +738,29 @@ class Results:
         names = self.stock_point_names
         if not names:
             return pl.DataFrame(schema=STOCK_POINT_SCHEMA)
-        window = self.inventory.filter(pl.col("time") >= self.settings.warmup)
-        measured = window.group_by("stock_point").agg(
-            pl.len().alias("periods"),
-            pl.col("demand").mean().alias("mean_demand"),
-            pl.col("order_quantity").mean().alias("mean_order"),
-            pl.col("demand").var(ddof=1).alias("demand_variance"),
-            pl.col("order_quantity").var(ddof=1).alias("order_variance"),
-            pl.col("demand").sum().alias("demanded"),
-            pl.col("filled").sum().alias("filled"),
-            pl.col("on_hand").mean().alias("mean_on_hand"),
-            pl.col("backorders").mean().alias("mean_backorders"),
-            pl.col("lost").sum().alias("lost_units"),
+        measured = (
+            inventory_df.lazy()
+            .filter(pl.col("time") >= self.settings.warmup)
+            .group_by("stock_point")
+            .agg(
+                pl.len().alias("periods"),
+                pl.col("demand").mean().alias("mean_demand"),
+                pl.col("order_quantity").mean().alias("mean_order"),
+                pl.col("demand").var(ddof=1).alias("demand_variance"),
+                pl.col("order_quantity").var(ddof=1).alias("order_variance"),
+                pl.col("demand").sum().alias("demanded"),
+                pl.col("filled").sum().alias("filled"),
+                pl.col("on_hand").mean().alias("mean_on_hand"),
+                pl.col("backorders").mean().alias("mean_backorders"),
+                pl.col("lost").sum().alias("lost_units"),
+            )
         )
         return (
             pl.DataFrame(
                 data={"stock_point": names},
                 schema={"stock_point": pl.String},
             )
+            .lazy()
             .join(
                 other=measured,
                 on="stock_point",
@@ -772,6 +782,7 @@ class Results:
                     for column, dtype in STOCK_POINT_SCHEMA.items()
                 ]
             )
+            .collect()
         )
 
     def report(self) -> pl.DataFrame:
@@ -1077,6 +1088,7 @@ class Results:
         self._require_records("export()")
         capacities = self.settings.capacities
         assert capacities is not None
+        assert self._graph is not None
         metadata = {
             "time_unit": self.settings.time_unit,
             "duration": self.settings.duration,

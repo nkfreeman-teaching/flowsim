@@ -514,3 +514,17 @@ def test_constant_durations_give_a_fits_table():
         warnings.simplefilter("ignore")
         table = fit_all([1.0, 1.0, 1.0]).table
     assert table.get_column("sd").is_finite().all()
+
+
+def test_constant_durations_with_shifted_fail_cleanly():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(ValueError, match="No family produced a valid fit"):
+            fit_all([1.0, 1.0, 1.0], shifted=True)
+
+
+def test_continuous_fit_plot_concentrates_grid_on_offset_data():
+    figure = fit_all([1000.0, 1001.0, 1002.0, 1003.0, 1001.5]).plot()
+    pdf_trace = figure.data[1]
+    in_range = sum(999.0 <= x <= 1004.0 for x in pdf_trace.x)
+    assert in_range > 200

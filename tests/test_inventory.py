@@ -756,3 +756,76 @@ def test_constant_lead_time_cover_counts_whole_periods():
         pytest.approx(0.3),
         pytest.approx(0.4),
     ]
+
+
+def test_fractional_review_period_does_not_overshoot_duration():
+    model = Model(time_unit="days")
+    demand = model.demand(
+        name="Consumers",
+        per_period=10,
+    )
+    store = stage(
+        model=model,
+        name="Store",
+        initial=20,
+        lead_time=0.3,
+    )
+    model.supply(
+        [demand, store],
+        period=0.3,
+    )
+    result = model.run(
+        duration=0.9,
+        seed=1,
+    )
+    assert result.inventory.height == 3
+    assert result.inventory.get_column("period").to_list() == [0, 1, 2]
+
+
+def test_continuous_demand_supply_balances_stay_non_negative():
+    from flowsim import normal
+
+    model = Model(time_unit="weeks")
+    demand = model.demand(
+        name="Consumers",
+        per_period=normal(
+            mean=100,
+            sd=10,
+        ),
+    )
+    stages = [
+        model.stock_point(
+            name=name,
+            initial=200,
+            lead_time=2,
+            shortage="backorder",
+            policy=order_up_to(
+                forecast=moving_average(window=5),
+                safety_factor=0,
+            ),
+            forecast_from="orders",
+        )
+        for name in ["Retailer", "Wholesaler", "Distributor", "Factory"]
+    ]
+    model.supply(
+        [demand, *stages],
+        period=1,
+    )
+    result = model.run(
+        duration=104,
+        seed=7,
+    )
+    for column in ["on_hand", "on_order", "backorders", "shipped"]:
+        assert (result.inventory.get_column(column) >= 0).all()
+
+
+def test_empty_forecast_history_raises_value_error():
+    forecast = moving_average(window=3)
+    policy = order_up_to(
+        forecast=forecast,
+        safety_factor=1,
+    )
+    with pytest.raises(ValueError, match="must not be empty"):
+        forecast.forecast([])
+    with pytest.raises(ValueError, match="must not be empty"):
+        policy.target([], cover=2)

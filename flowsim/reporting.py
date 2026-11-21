@@ -60,9 +60,10 @@ def confidence_level(value: float) -> float:
     return level
 
 
-def interval_estimate(values: np.ndarray, confidence: float) -> dict:
+def interval_estimate(values: np.ndarray | list[float], confidence: float) -> dict:
     """Estimate uncertainty across independent finite replication values."""
-    values = values[np.isfinite(values)]
+    array = np.asarray(values, dtype=float)
+    values = array[np.isfinite(array)]
     count = len(values)
     mean = float(values.mean()) if count else None
     lower = upper = None
@@ -646,7 +647,9 @@ def scenario_runs(
     left out.
     """
     return {
-        name: [None if math.isnan(value) else float(value) for value in runs[place]]
+        name: [
+            None if not math.isfinite(value) else float(value) for value in runs[place]
+        ]
         for name, runs in values.items()
         if place in runs
     }

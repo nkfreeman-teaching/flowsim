@@ -1445,6 +1445,31 @@ class Model:
                 problems[node.name] = " ".join(notes)
         return problems
 
+    def _validate_run_args(
+        self,
+        *,
+        duration: float,
+        warmup: float,
+        drain: bool,
+    ) -> tuple[float, float]:
+        self.validate()
+        horizon = number(
+            value=duration,
+            label="Run duration",
+            positive=True,
+        )
+        start = number(warmup, "Warm-up duration")
+        if start >= horizon:
+            raise ValueError("Warm-up duration must be shorter than run duration.")
+        if not isinstance(drain, bool):
+            raise ValueError("drain must be True or False.")
+        if drain and self._supply is not None:
+            raise ValueError(
+                "drain serves customers after closing, and a supply chain reviews "
+                "only until closing."
+            )
+        return horizon, start
+
     def run(
         self,
         duration: float,
@@ -1488,22 +1513,11 @@ class Model:
         -------
         >>> results = model.run(duration=480, seed=7, warmup=60, drain=True)
         """
-        self.validate()
-        horizon = number(
-            value=duration,
-            label="Run duration",
-            positive=True,
+        horizon, start = self._validate_run_args(
+            duration=duration,
+            warmup=warmup,
+            drain=drain,
         )
-        start = number(warmup, "Warm-up duration")
-        if start >= horizon:
-            raise ValueError("Warm-up duration must be shorter than run duration.")
-        if not isinstance(drain, bool):
-            raise ValueError("drain must be True or False.")
-        if drain and self._supply is not None:
-            raise ValueError(
-                "drain serves customers after closing, and a supply chain reviews "
-                "only until closing."
-            )
         return simulate(
             model=self,
             duration=horizon,
@@ -1577,19 +1591,22 @@ class Model:
                 minimum=0,
             )
         ).spawn(count)
-        runs = []
-        for child in seeds:
-            run = self.run(
-                duration=duration,
-                seed=int(child.generate_state(1)[0]),
-                warmup=warmup,
+        horizon, start = self._validate_run_args(
+            duration=duration,
+            warmup=warmup,
+            drain=drain,
+        )
+        runs = [
+            simulate(
+                model=self,
+                duration=horizon,
+                warmup=start,
                 drain=drain,
+                seed=int(child.generate_state(1)[0]),
+                keep_records=keep_records,
             )
-            # Drop each run's records before the next run starts, so memory
-            # holds one run's records at a time.
-            if not keep_records:
-                run._drop_records()
-            runs.append(run)
+            for child in seeds
+        ]
         return Experiment(runs)
 
 

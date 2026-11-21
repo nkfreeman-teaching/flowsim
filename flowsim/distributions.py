@@ -1068,7 +1068,15 @@ def shifted(distribution: Distribution | dict, *, by: float) -> Shifted:
                 example,
                 {"distribution": distribution},
             )
-        distribution = _CONSTRUCTORS[name](**arguments)
+        try:
+            distribution = _CONSTRUCTORS[name](**arguments)
+        except TypeError:
+            raise _bad(
+                "shifted",
+                "a distribution or the spec() of one",
+                example,
+                {"distribution": distribution},
+            ) from None
     if not isinstance(distribution, Distribution):
         raise _bad(
             "shifted",

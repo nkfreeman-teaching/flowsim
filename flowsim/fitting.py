@@ -416,7 +416,20 @@ class Fits:
                 col=1,
             )
         else:
-            grid = np.linspace(0, values[-1] * 1.1, 400)
+            span = float(values[-1] - values[0])
+            pad = 0.15 * span if span > 0 else max(1.0, 0.1 * float(values[-1]))
+            low = (
+                max(0.0, float(values[0]) - pad)
+                if span > 0 and values[0] > 0.25 * values[-1]
+                else 0.0
+            )
+            high = float(values[-1]) + pad
+            dense = np.linspace(low, high, 400)
+            grid = (
+                np.concatenate([np.linspace(0.0, low, 25, endpoint=False), dense])
+                if low > 0
+                else dense
+            )
             figure.add_trace(
                 go.Histogram(
                     x=data,
@@ -723,7 +736,9 @@ def _fit_duration(values: np.ndarray, family: str, free_location: bool) -> Fit:
     # data's range or above 1e-3, so 1e-6 separates them. The exponential's
     # location equals the minimum at its true maximum, so it is kept.
     if free_location and family in ("gamma", "lognormal", "weibull"):
-        if float(values.min()) - loc <= 1e-6 * float(np.ptp(values)):
+        span = float(np.ptp(values))
+        scale_ref = span if span > 0 else max(1.0, abs(float(values.min())))
+        if float(values.min()) - loc <= 1e-6 * scale_ref:
             raise _NoFit(
                 "its fitted minimum time reached the smallest observation, "
                 "where the likelihood has no maximum; fit without shifted=True"

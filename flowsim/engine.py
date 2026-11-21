@@ -101,8 +101,8 @@ class _Stock:
     backorders: float = 0.0
     on_order: float = 0.0
     produced: float = 0.0
-    history: list[float] = field(default_factory=list)
-    pipeline: deque[tuple[int, _Shipment]] = field(default_factory=deque)
+    history: deque[float] = field(default_factory=deque)
+    pipeline: deque[tuple[int, _Shipment | float]] = field(default_factory=deque)
 
 
 class _Same:
@@ -175,12 +175,14 @@ class _Run:
         warmup: float,
         seed: int,
         drain: bool,
+        keep_records: bool = True,
     ):
         self.model = model
         self.duration = duration
         self.warmup = warmup
         self.seed = seed
         self.drain = drain
+        self.keep_records = keep_records
         self.scheduler = Scheduler()
         self.customers: list[_Customer] = []
         self.visits: list[_Visit] = []
@@ -244,6 +246,10 @@ class _Run:
                     ),
                     shares=shares,
                 )
+        self.has_failures = any(
+            node.kind == "station" and node.time_to_failure is not None
+            for node in nodes.values()
+        )
         self.stations: dict[str, _Station] = {}
         for name in names:
             node = nodes[name]
@@ -277,6 +283,7 @@ class _Run:
                     cover=cover,
                     rng=self.streams[node.name].durations,
                     on_hand=node.initial,
+                    history=deque(maxlen=policy.forecast.window),
                 )
             )
 
@@ -301,6 +308,13 @@ class _Run:
         """
 
         def key(value: object) -> object:
+            if isinstance(value, Shifted):
+                return ("shifted", key(value.distribution), value.by)
+            if isinstance(value, Distribution) and type(value).__module__ in _BUILT_IN:
+                inner = getattr(value, "distribution", None)
+                if isinstance(inner, Distribution):
+                    return ("fit", key(inner))
+                return value
             if callable(value):
                 return _Same(value)
             if isinstance(value, Mapping):
@@ -336,7 +350,12 @@ class _Run:
             return route.destinations[0]
         return route.destinations[draw_index(route.shares, self.streams[name].routing)]
 
-    def next_arrival_time(self, node: Node, rng: np.random.Generator) -> float | None:
+    def next_arrival_time(
+        self,
+        node: Node,
+        rng: np.random.Generator,
+        label: str,
+    ) -> float | None:
         now = float(self.scheduler.now)
         if node.arrival_rates is not None:
             return next_arrival(
@@ -350,7 +369,7 @@ class _Run:
         gap = sample(
             distribution=node.interarrival,
             rng=rng,
-            label=f"Interarrival time at {node.name!r}",
+            label=label,
             positive=True,
         )
         arrival = now + gap
@@ -365,6 +384,7 @@ class _Run:
 
     def source(self, node: Node):
         rng = self.streams[node.name].durations
+        interarrival_label = f"Interarrival time at {node.name!r}"
         types = node.types
         kinds = None if types is None else list(types)
         shares = None
@@ -376,7 +396,7 @@ class _Run:
             return
         arrival = node.first_arrival
         if arrival is None:
-            arrival = self.next_arrival_time(node, rng)
+            arrival = self.next_arrival_time(node, rng, interarrival_label)
         produced = 0
         # The limit is checked after each arrival, before sampling another gap.
         while arrival is not None and arrival < self.duration:
@@ -402,7 +422,7 @@ class _Run:
             produced += 1
             if node.limit is not None and produced >= node.limit:
                 return
-            arrival = self.next_arrival_time(node, rng)
+            arrival = self.next_arrival_time(node, rng, interarrival_label)
 
     def customer(self, customer: _Customer, source: Node):
         node = self.next_node(source.name, customer)
@@ -416,7 +436,8 @@ class _Run:
             if ticket is None:
                 self.complete_active()
                 return
-            yield ticket.admitted
+            if ticket.admitted is not None:
+                yield ticket.admitted
             while True:
                 yield ticket.finished
                 destination = self.next_node(node.name, customer)
@@ -427,7 +448,7 @@ class _Run:
                 downstream = self.stations[destination.name]
                 next_ticket = downstream.admit(customer, external=False)
                 # admit rejects only a customer arriving from outside.
-                assert next_ticket is not None
+                assert next_ticket is not None and next_ticket.admitted is not None
                 yield next_ticket.admitted
                 station.release(ticket)
                 node = destination
@@ -452,7 +473,12 @@ class _Run:
         chain = self.model.supply_chain
         assert chain is not None  # run() starts this process only for a chain.
         period = 0
-        while period * chain.period < self.duration:
+        while period * chain.period < self.duration and not math.isclose(
+            period * chain.period,
+            self.duration,
+            rel_tol=1e-9,
+            abs_tol=0.0,
+        ):
             yield self.scheduler.timeout(
                 period * chain.period - self.scheduler.now,
                 priority=REVIEW_PRIORITY,
@@ -483,16 +509,20 @@ class _Run:
             received = stock.produced
             stock.produced = 0.0
             while stock.pipeline and stock.pipeline[0][0] <= period:
-                _, shipment = stock.pipeline.popleft()
-                shipment.arrival_time = time
-                received += shipment.quantity
+                _, item = stock.pipeline.popleft()
+                if isinstance(item, _Shipment):
+                    item.arrival_time = time
+                    received += item.quantity
+                else:
+                    received += item
             stock.on_hand += received
-            stock.on_order -= received
+            stock.on_order = max(0.0, stock.on_order - received)
             # Backorders are older than this period's orders, so they ship first.
             late = min(stock.on_hand, stock.backorders)
-            filled = min(stock.on_hand - late, incoming)
-            stock.on_hand -= late + filled
-            stock.backorders -= late
+            available = stock.on_hand - late
+            filled = min(available, incoming)
+            stock.on_hand = max(0.0, available - filled)
+            stock.backorders = max(0.0, stock.backorders - late)
             lost = 0.0
             if stock.node.shortage == "backorder":
                 stock.backorders += incoming - filled
@@ -500,7 +530,7 @@ class _Run:
                 lost = incoming - filled
                 # The downstream stage will never receive a lost order.
                 if downstream is not None:
-                    downstream.on_order -= lost
+                    downstream.on_order = max(0.0, downstream.on_order - lost)
             if downstream is not None and late + filled > 0:
                 self.ship(
                     sender=stock.node.name,
@@ -597,15 +627,18 @@ class _Run:
         due = period + periods
         if receiver.pipeline:
             due = max(due, receiver.pipeline[-1][0])
-        shipment = _Shipment(
-            sender=sender,
-            receiver=node.name,
-            quantity=quantity,
-            ship_time=period * length,
-            lead_time=lead_time,
-        )
-        self.shipments.append(shipment)
-        receiver.pipeline.append((due, shipment))
+        if self.keep_records:
+            shipment = _Shipment(
+                sender=sender,
+                receiver=node.name,
+                quantity=quantity,
+                ship_time=period * length,
+                lead_time=lead_time,
+            )
+            self.shipments.append(shipment)
+            receiver.pipeline.append((due, shipment))
+        else:
+            receiver.pipeline.append((due, quantity))
 
     def supply_settings(self) -> SupplySettings | None:
         chain = self.model.supply_chain
@@ -678,19 +711,13 @@ class _Run:
                 self.observe(name)
         states = [row for history in self.histories.values() for row in history]
         # A phase that starts and ends at the same instant carries no time.
-        activities = [
-            row for row in self.activities if row.end is None or row.end > row.start
-        ]
-        return Results(
-            customers=self.customers,
-            visits=self.visits,
-            states=states,
-            activities=activities,
-            failures=self.failures,
-            inventory=self.inventory,
-            shipments=self.shipments,
-            supply=self.supply_settings(),
-            definitions={
+        activities = (
+            [row for row in self.activities if row.end is None or row.end > row.start]
+            if self.keep_records
+            else []
+        )
+        definitions = (
+            {
                 name: {
                     "types": None if node.types is None else dict(node.types),
                     "arrival_rates": node.arrival_rates,
@@ -706,7 +733,20 @@ class _Run:
                 }
                 for name, node in self.model.nodes.items()
                 if node.kind in {"source", "station", "exit"}
-            },
+            }
+            if self.keep_records
+            else {}
+        )
+        return Results(
+            customers=self.customers,
+            visits=self.visits,
+            states=states,
+            activities=activities,
+            failures=self.failures,
+            inventory=self.inventory,
+            shipments=self.shipments,
+            supply=self.supply_settings(),
+            definitions=definitions,
             resources_vary=self.resources_vary(),
             capacities={
                 name: station.node.capacity for name, station in self.stations.items()
@@ -718,8 +758,9 @@ class _Run:
             warmup=self.warmup,
             time_unit=self.model.time_unit,
             seed=self.seed,
-            graph=self.model.graph,
+            graph=self.model.graph if self.keep_records else None,
             definition=self.definition(),
+            keep_records=self.keep_records,
         )
 
 
@@ -729,6 +770,8 @@ def simulate(
     warmup: float,
     seed: int,
     drain: bool,
+    *,
+    keep_records: bool = True,
 ) -> Results:
     return _Run(
         model=model,
@@ -736,4 +779,5 @@ def simulate(
         warmup=warmup,
         seed=seed,
         drain=drain,
+        keep_records=keep_records,
     ).execute()

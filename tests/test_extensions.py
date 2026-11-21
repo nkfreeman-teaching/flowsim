@@ -1137,3 +1137,62 @@ def test_stacked_layers_follow_a_shift_change_only_when_it_runs(drain, start, ch
         (0.0, 0, 0, 0, 0, start, start),
         (3.0, 0, 0, 0, 0, final, final),
     ]
+
+
+def test_available_failure_clock_has_no_ulp_drift_from_customer_arrivals():
+    model = Model()
+    arrivals = model.source(
+        name="Arrivals",
+        interarrival=0.073,
+        first_arrival=0,
+    )
+    machine = model.station(
+        name="Machine",
+        capacity=1,
+        service_time=0.031,
+        time_to_failure=1.7,
+        repair_time=0.1,
+        failure_clock="available",
+    )
+    model.route([arrivals, machine, model.exit])
+    result = model.run(duration=2.0)
+    assert result.failures.get_column("failure_time").to_list() == [1.7]
+
+
+def test_shift_change_does_not_snap_unaffected_server_completion():
+    model = Model()
+    arrivals = model.source(
+        name="Arrivals",
+        interarrival=10,
+        first_arrival=0.1,
+        limit=1,
+    )
+    desk = model.station(
+        name="Desk",
+        capacity=2,
+        service_time=0.2 + 5.6e-17,
+        staffing=[(0, 2), (0.3, 1)],
+        shift_end="pause",
+    )
+    model.route([arrivals, desk, model.exit])
+    result = model.run(
+        duration=1.0,
+        drain=True,
+    )
+    assert result.visits.get_column("service_end").to_list() == [0.1 + (0.2 + 5.6e-17)]
+
+
+def test_extreme_arrival_rate_raises_instead_of_hanging():
+    model = Model()
+    arrivals = model.source(
+        name="Burst",
+        rates=[(0, 1e100)],
+    )
+    desk = model.station(
+        name="Desk",
+        capacity=1,
+        service_time=1,
+    )
+    model.route([arrivals, desk, model.exit])
+    with pytest.raises(ValueError, match="too large for time to advance"):
+        model.run(duration=10)

@@ -73,9 +73,14 @@ class AnyOf(Event):
             self.succeed()
 
     def build_value(self, event: Event) -> None:
+        check = self.check
         for other in self.events:
-            if other.callbacks is not None and self.check in other.callbacks:
-                other.callbacks.remove(self.check)
+            callbacks = other.callbacks
+            if callbacks is not None:
+                if len(callbacks) == 1 and callbacks[0] == check:
+                    callbacks.clear()
+                elif check in callbacks:
+                    callbacks.remove(check)
         self.value = [other for other in self.events if other.callbacks is None]
 
 

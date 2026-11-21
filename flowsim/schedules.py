@@ -78,7 +78,8 @@ def next_arrival(
         spent = rate * (end - cursor)
         if rate > 0 and hazard < spent:
             arrival = cursor + hazard / rate
-            if arrival <= now:
+            step = arrival - now
+            if arrival <= now or horizon + step == horizon:
                 raise ValueError("Arrival rate is too large for time to advance.")
             return arrival
         hazard -= spent

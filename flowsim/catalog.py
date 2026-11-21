@@ -1194,6 +1194,8 @@ def explain(name: str) -> None:
     -------
     >>> flowsim.explain("p95_wait")
     """
+    if not isinstance(name, str):
+        raise ValueError(f"Name must be a string, not {name!r}.")
     metric = METRICS.get(name)
     columns = sorted((table, column) for table, column in COLUMNS if column == name)
     if metric is None and not columns:

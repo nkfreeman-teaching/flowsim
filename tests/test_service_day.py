@@ -776,3 +776,60 @@ def test_results_export_removes_stale_comparison_files(tmp_path):
     for name in ["runs.csv", "intervals.csv", "differences.csv"]:
         assert not (tmp_path / name).exists()
     assert (tmp_path / "summary.csv").exists()
+
+
+def test_experiment_pools_separately_built_named_distribution_models():
+    from flowsim import exponential
+
+    def make() -> Model:
+        model = Model()
+        arrivals = model.source(
+            name="Arrivals",
+            interarrival=exponential(mean=3),
+        )
+        desk = model.station(
+            name="Desk",
+            capacity=1,
+            service_time=exponential(mean=2),
+        )
+        model.route([arrivals, desk, model.exit])
+        return model
+
+    experiment = Experiment([make().run(60, seed=1), make().run(60, seed=2)])
+    assert len(experiment.runs) == 2
+
+
+def test_comparison_validates_scenario_names_and_matching_seeds():
+    one = deterministic_queue().experiment(
+        duration=7,
+        replications=2,
+        seed=1,
+    )
+    two = deterministic_queue(capacity=2).experiment(
+        duration=7,
+        replications=2,
+        seed=2,
+    )
+    with pytest.raises(ValueError, match="nonempty strings"):
+        Comparison({"": one, "Two": two})
+    with pytest.raises(ValueError, match="identical replication seeds"):
+        Comparison({"One": one, "Two": two})
+
+
+def test_single_observed_run_interval_has_mean_and_missing_bounds():
+    from flowsim.reporting import interval_estimate
+
+    estimate = interval_estimate([4.25], confidence=0.95)
+    assert estimate["observed_runs"] == 1
+    assert estimate["mean"] == 4.25
+    assert estimate["lower"] is None
+    assert estimate["upper"] is None
+
+
+def test_explain_rejects_non_string_and_shifted_rejects_bad_spec_keys():
+    from flowsim import explain, shifted
+
+    with pytest.raises(ValueError, match="must be a string"):
+        explain(123)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="shifted"):
+        shifted({"name": "exponential", "bad": 1}, by=1)

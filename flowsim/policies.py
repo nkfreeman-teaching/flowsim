@@ -8,10 +8,19 @@ its inventory position below the target, never a negative quantity.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from flowsim.validation import integer, number
+
+
+def _recent_window(history: Collection[float], window: int) -> Collection[float]:
+    if not history:
+        raise ValueError("Forecast history must not be empty.")
+    if len(history) <= window:
+        return history
+    assert isinstance(history, Sequence)
+    return history[-window:]
 
 
 @dataclass(frozen=True)
@@ -20,10 +29,10 @@ class MovingAverage:
 
     window: int
 
-    def forecast(self, history: Sequence[float]) -> float:
+    def forecast(self, history: Collection[float]) -> float:
         # Before window periods have passed, the mean uses every observation so
         # far. A review always follows at least one observation.
-        recent = history[-self.window :]
+        recent = _recent_window(history, self.window)
         return sum(recent) / len(recent)
 
 
@@ -35,7 +44,7 @@ class OrderUpTo:
     safety_factor: float
     cover: float | None = None
 
-    def target(self, history: Sequence[float], cover: float) -> tuple[float, float]:
+    def target(self, history: Collection[float], cover: float) -> tuple[float, float]:
         """Return the forecast and the target for a known cover in periods.
 
         Safety stock is safety_factor * sqrt(cover) times the sample standard
@@ -43,12 +52,12 @@ class OrderUpTo:
         zero until the window is full, since a deviation from two or three early
         observations can set a target far above steady demand.
         """
-        forecast = self.forecast.forecast(history)
+        recent = _recent_window(history, self.forecast.window)
+        count = len(recent)
+        forecast = sum(recent) / count
         safety = 0.0
-        if self.safety_factor > 0 and len(history) >= self.forecast.window:
-            recent = history[-self.forecast.window :]
-            mean = sum(recent) / len(recent)
-            variance = sum((value - mean) ** 2 for value in recent) / (len(recent) - 1)
+        if self.safety_factor > 0 and count >= self.forecast.window:
+            variance = sum((value - forecast) ** 2 for value in recent) / (count - 1)
             safety = self.safety_factor * math.sqrt(cover) * math.sqrt(variance)
         return forecast, cover * forecast + safety
 
