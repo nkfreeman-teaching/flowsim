@@ -1233,3 +1233,126 @@ def test_interior_finite_buffer_does_not_require_external_overflow():
     # A finite-buffer station fed directly by a source still requires external_overflow.
     with pytest.raises(ValueError, match="external_overflow"):
         single_station(buffer=0).validate()
+
+
+def test_conwip_wip_limit_wait_matches_hand_calculation():
+    # Two serial 1-server stations (service times 2 and 3), wip_limit=2,
+    # wip_overflow="wait". Customers arrive at 0, 1, 2, 3 (limit=4).
+    # C1: arrives 0, admitted 0, S1 [0,2], S2 [2,5], exits 5.
+    #     flow=5, in_system=5, outside=0.
+    # C2: arrives 1, admitted 1 (in_system_wip=2), S1 [2,4], S2 [5,8], exits 8.
+    #     flow=7, in_system=7, outside=0.
+    # C3: arrives 2, waits at WIP gate until C1 exits at 5 -> admitted 5,
+    #     S1 [5,7], S2 [8,11], exits 11. flow=9, in_system=6, outside=3.
+    # C4: arrives 3, waits at WIP gate until C2 exits at 8 -> admitted 8,
+    #     S1 [8,10], S2 [11,14], exits 14. flow=11, in_system=6, outside=5.
+    model = Model(
+        wip_limit=2,
+        wip_overflow="wait",
+    )
+    arrivals = model.source(
+        name="Jobs",
+        interarrival=1,
+        first_arrival=0,
+        limit=4,
+    )
+    s1 = model.station(
+        name="S1",
+        capacity=1,
+        service_time=2,
+    )
+    s2 = model.station(
+        name="S2",
+        capacity=1,
+        service_time=3,
+    )
+    model.route([arrivals, s1, s2, model.exit])
+    result = model.run(
+        duration=10,
+        drain=True,
+    )
+    assert result.customers.get_column("admission_time").to_list() == [
+        0.0,
+        1.0,
+        5.0,
+        8.0,
+    ]
+    assert result.customers.get_column("outside_wait").to_list() == [0.0, 0.0, 3.0, 5.0]
+    assert result.customers.get_column("flow_time").to_list() == [5.0, 7.0, 9.0, 11.0]
+    assert result.customers.get_column("in_system_time").to_list() == [
+        5.0,
+        7.0,
+        6.0,
+        6.0,
+    ]
+    summary = result.summary.row(0, named=True)
+    assert summary["mean_flow_time"] == pytest.approx(8.0)
+    assert summary["mean_in_system_time"] == pytest.approx(6.0)
+    assert summary["mean_outside_wait"] == pytest.approx(2.0)
+    # Over [0, 10):
+    # Inside presence: C1 [0,5]=5, C2 [1,8]=7, C3 [5,10]=5, C4 [8,10]=2 -> 19 / 10 = 1.9
+    # Outside presence: C3 [2,5]=3, C4 [3,8]=5 -> 8 / 10 = 0.8
+    assert summary["mean_wip"] == pytest.approx(1.9)
+    assert summary["mean_outside_wip"] == pytest.approx(0.8)
+    assert summary["mean_total_wip"] == pytest.approx(2.7)
+    # Linear quantiles over [5, 7, 9, 11]: p90 = 10.4, p95 = 10.7
+    assert summary["p90_flow_time"] == pytest.approx(10.4)
+    assert summary["p95_flow_time"] == pytest.approx(10.7)
+
+
+def test_conwip_wip_limit_reject_and_validation():
+    model = Model(
+        wip_limit=1,
+        wip_overflow="reject",
+    )
+    arrivals = model.source(
+        name="Jobs",
+        interarrival=1,
+        first_arrival=0,
+        limit=3,
+    )
+    desk = model.station(
+        name="Desk",
+        capacity=1,
+        service_time=2,
+    )
+    model.route([arrivals, desk, model.exit])
+    result = model.run(
+        duration=5,
+        drain=True,
+    )
+    # C1 [0,2] admitted; C2 arrives at 1 -> rejected; C3 arrives at 2 (after C1 exits) -> admitted [2,4].
+    assert result.summary.get_column("admitted").to_list() == [2]
+    assert result.summary.get_column("rejected").to_list() == [1]
+    assert result.summary.get_column("completed").to_list() == [2]
+    with pytest.raises(ValueError, match="wip_overflow"):
+        Model(wip_limit=2)
+    with pytest.raises(ValueError, match="requires a WIP limit"):
+        Model(wip_overflow="wait")
+    with pytest.raises(ValueError, match="WIP limit must be an integer"):
+        Model(wip_limit=0, wip_overflow="wait")
+
+
+def test_station_paused_and_idle_fractions_match_hand_calculation():
+    # Capacity 1, staffing [(0, 1), (2, 0), (4, 1)], shift_end="pause".
+    # One customer arrives at 1 with service_time=2 -> processes [1,2), pauses [2,4),
+    # resumes [4,5). Over [0, 6): idle [0,1) + [5,6) = 2/6, processing = 2/6, paused = 2/6.
+    model = Model()
+    arrivals = model.source(
+        name="Jobs",
+        interarrival=10,
+        first_arrival=1,
+        limit=1,
+    )
+    desk = model.station(
+        name="Desk",
+        capacity=1,
+        service_time=2,
+        staffing=[(0, 1), (2, 0), (4, 1)],
+        shift_end="pause",
+    )
+    model.route([arrivals, desk, model.exit])
+    row = model.run(duration=6).stations.row(0, named=True)
+    assert row["processing_utilization"] == pytest.approx(2 / 6)
+    assert row["paused_fraction"] == pytest.approx(2 / 6)
+    assert row["idle_fraction"] == pytest.approx(2 / 6)

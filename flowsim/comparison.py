@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -21,13 +21,16 @@ from flowsim.plots import plotly_figure
 from flowsim.reporting import (
     comparison_differences,
     comparison_intervals,
+    custom_estimate,
     dashboard,
     export_tables,
     interval_figure,
     request_metadata,
+    summary_table,
 )
 from flowsim.results import (
     Experiment,
+    Results,
     Settings,
     _run_settings,
     stack,
@@ -276,6 +279,104 @@ class Comparison:
             station=station,
             stock_point=stock_point,
             confidence=confidence,
+        )
+
+    def table(
+        self,
+        metrics: Sequence[str],
+        *,
+        station: str | None = None,
+        stock_point: str | None = None,
+        confidence: float = 0.95,
+        intervals: bool = False,
+        differences: bool = False,
+        baseline: str | None = None,
+    ) -> pl.DataFrame:
+        """Assemble several replication metrics across scenarios into one wide table.
+
+        Parameters
+        ----------
+        metrics : sequence of str
+            Replication metric names from ``flowsim.metrics()``.
+        station : str, optional
+            Station to report for station metrics. Without it, every station.
+        stock_point : str, optional
+            Stock point to report for stock-point metrics. Without it, every
+            stock point.
+        confidence : float, default 0.95
+            Confidence level when ``intervals=True``, strictly between 0 and 1.
+        intervals : bool, default False
+            Whether to include ``<metric>_lower`` and ``<metric>_upper`` columns.
+        differences : bool, default False
+            Whether to report paired differences from ``baseline`` instead of
+            scenario means.
+        baseline : str, optional
+            Reference scenario when ``differences=True``. Defaults to the first
+            scenario.
+
+        Returns
+        -------
+        polars.DataFrame
+            One row per scenario (and location when applicable) with one column
+            per requested metric.
+
+        Example
+        -------
+        >>> comparison.table(["mean_wip", "throughput", "mean_flow_time"])
+        """
+        return summary_table(
+            experiments=self.experiments,
+            metrics=metrics,
+            comparing=True,
+            station=station,
+            stock_point=stock_point,
+            confidence=confidence,
+            intervals=intervals,
+            differences=differences,
+            reference=self._reference(baseline) if differences else None,
+        )
+
+    def estimate(
+        self,
+        fn: Callable[[Results], float | None],
+        *,
+        confidence: float = 0.95,
+        differences: bool = False,
+        baseline: str | None = None,
+    ) -> pl.DataFrame:
+        """Estimate a custom per-run quantity across scenarios with Student t intervals.
+
+        Parameters
+        ----------
+        fn : callable
+            Function taking one ``Results`` and returning a finite float or
+            ``None`` (excluded from the estimate).
+        confidence : float, default 0.95
+            Confidence level of the interval, strictly between 0 and 1.
+        differences : bool, default False
+            Whether to report paired differences from ``baseline`` instead of
+            per-scenario means.
+        baseline : str, optional
+            Reference scenario when ``differences=True``. Defaults to the first
+            scenario.
+
+        Returns
+        -------
+        polars.DataFrame
+            One row per scenario with ``mean``, ``lower``, ``upper``, and
+            ``observed_runs``.
+
+        Example
+        -------
+        >>> comparison.estimate(lambda r: float(r.summary["overtime"].item() <= 30))
+        """
+        return custom_estimate(
+            experiments=self.experiments,
+            fn=fn,
+            comparing=True,
+            confidence=confidence,
+            differences=differences,
+            reference=self._reference(baseline) if differences else None,
         )
 
     def plot(

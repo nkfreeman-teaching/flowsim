@@ -76,6 +76,10 @@ def station_metrics(
             waits.count().alias("wait_observations"),
             waits.mean().alias("mean_wait"),
             waits.quantile(
+                quantile=0.90,
+                interpolation="linear",
+            ).alias("p90_wait"),
+            waits.quantile(
                 quantile=0.95,
                 interpolation="linear",
             ).alias("p95_wait"),
@@ -138,7 +142,9 @@ def station_metrics(
             (pl.col("busy_area") / installed).alias("utilization"),
             (pl.col("processing_area") / installed).alias("processing_utilization"),
             (pl.col("blocked_area") / installed).alias("blocking_fraction"),
+            (pl.col("paused_area") / installed).alias("paused_fraction"),
             (pl.col("down_area") / installed).alias("downtime_fraction"),
+            (pl.col("idle_area") / installed).alias("idle_fraction"),
             (pl.col("scheduled_area") / window).alias("mean_scheduled_servers"),
             (pl.col("available_area") / window).alias("mean_available_servers"),
             (pl.col("outside_area") / window).alias("mean_outside_queue"),
@@ -171,6 +177,8 @@ def system_metrics(
         empty["overtime"] = [end_time - duration]
         empty["throughput"] = [0.0]
         empty["mean_wip"] = [0.0]
+        empty["mean_outside_wip"] = [0.0]
+        empty["mean_total_wip"] = [0.0]
         return pl.DataFrame(
             data=empty,
             schema=SUMMARY_SCHEMA,
@@ -232,9 +240,34 @@ def system_metrics(
     # Float sums and means stay on filtered frames, as before, since a
     # filtered expression can sum in a different order (last-bit changes).
     done = customers_df.filter(finished)
-    for column in ["flow_time", "total_wait", "total_blocked", "outside_wait"]:
+    for column in [
+        "flow_time",
+        "in_system_time",
+        "total_wait",
+        "total_blocked",
+        "outside_wait",
+    ]:
         counts[f"mean_{column}"] = done.get_column(column).mean()
+    for column in ["flow_time", "total_wait"]:
+        series = done.get_column(column)
+        counts[f"p90_{column}"] = series.quantile(
+            quantile=0.90,
+            interpolation="linear",
+        )
+        counts[f"p95_{column}"] = series.quantile(
+            quantile=0.95,
+            interpolation="linear",
+        )
     counts["presence"] = customers_df.filter(inside).select(presence.sum()).item()
+    outside_presence_expr = (
+        pl.coalesce("admission_time", "abandon_time")
+        .fill_null(duration)
+        .clip(upper_bound=duration)
+        - pl.col("arrival_time").clip(lower_bound=warmup)
+    ).clip(lower_bound=0)
+    counts["outside_presence"] = (
+        customers_df.filter(eligible).select(outside_presence_expr.sum()).item()
+    )
     window = duration - warmup
     rejected = counts["arrivals"] - counts["eligible"]
     values = {
@@ -271,11 +304,18 @@ def system_metrics(
             counts["cohort"] - counts["finished"] - counts["cohort_abandoned"]
         ],
         "mean_flow_time": [counts["mean_flow_time"]],
+        "mean_in_system_time": [counts["mean_in_system_time"]],
+        "p90_flow_time": [counts["p90_flow_time"]],
+        "p95_flow_time": [counts["p95_flow_time"]],
         "mean_total_wait": [counts["mean_total_wait"]],
+        "p90_total_wait": [counts["p90_total_wait"]],
+        "p95_total_wait": [counts["p95_total_wait"]],
         "mean_total_blocked": [counts["mean_total_blocked"]],
         "mean_outside_wait": [counts["mean_outside_wait"]],
         "throughput": [counts["exits"] / window],
         "mean_wip": [counts["presence"] / window],
+        "mean_outside_wip": [counts["outside_presence"] / window],
+        "mean_total_wip": [(counts["presence"] + counts["outside_presence"]) / window],
     }
     return pl.DataFrame(
         data={column: values[column] for column in SUMMARY_SCHEMA},

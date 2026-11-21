@@ -194,6 +194,10 @@ class _Run:
         self.closed = False
         self.active_customers = 0
         self.finished = self.scheduler.event()
+        self.wip_limit = model.wip_limit
+        self.wip_overflow = model.wip_overflow
+        self.in_system_wip = 0
+        self.wip_queue: deque[tuple[_Customer, Event]] = deque()
         self.streams: dict[str, _Streams] = {}
         nodes = model.nodes
         names = list(nodes)
@@ -340,7 +344,14 @@ class _Run:
                 chain.period,
             )
         )
-        return (self.model.time_unit, nodes, routes, supply)
+        return (
+            self.model.time_unit,
+            self.model.wip_limit,
+            self.model.wip_overflow,
+            nodes,
+            routes,
+            supply,
+        )
 
     def next_node(self, name: str, customer: _Customer) -> Node:
         # Model.validate checks that each type reaching a node has a route.
@@ -424,16 +435,42 @@ class _Run:
                 return
             arrival = self.next_arrival_time(node, rng, interarrival_label)
 
+    def release_wip(self) -> None:
+        if self.wip_limit is None:
+            return
+        if self.wip_queue:
+            _, gate = self.wip_queue.popleft()
+            gate.succeed()
+        else:
+            self.in_system_wip -= 1
+
     def customer(self, customer: _Customer, source: Node):
+        if self.wip_limit is not None:
+            if self.in_system_wip >= self.wip_limit:
+                if self.wip_overflow == "reject":
+                    customer.status = Status.REJECTED
+                    customer.station = None
+                    self.complete_active()
+                    return
+                customer.status = Status.OUTSIDE
+                customer.station = None
+                gate = self.scheduler.event()
+                self.wip_queue.append((customer, gate))
+                yield gate
+            else:
+                self.in_system_wip += 1
         node = self.next_node(source.name, customer)
         if node.kind == "exit":
+            now = float(self.scheduler.now)
             customer.admitted = True
-            customer.admission_time = float(self.scheduler.now)
-            customer.outside_wait = 0.0
+            customer.admission_time = now
+            customer.outside_wait = now - customer.arrival_time
+            customer.total_wait += customer.outside_wait
         else:
             station = self.stations[node.name]
             ticket = station.admit(customer, external=True)
             if ticket is None:
+                self.release_wip()
                 self.complete_active()
                 return
             if ticket.admitted is not None:
@@ -454,13 +491,17 @@ class _Run:
                 node = destination
                 station = downstream
                 ticket = next_ticket
-        customer.exit_time = float(self.scheduler.now)
-        customer.flow_time = self.scheduler.now - customer.arrival_time
+        now = float(self.scheduler.now)
+        customer.exit_time = now
+        customer.flow_time = now - customer.arrival_time
+        assert customer.admission_time is not None
+        customer.in_system_time = now - customer.admission_time
         customer.status = Status.COMPLETED
         customer.station = None
         if customer.quantity is not None:
             # Only the top stage produces, and its next review receives these.
             self.stocks[-1].produced += customer.quantity
+        self.release_wip()
         self.complete_active()
 
     def complete_active(self) -> None:

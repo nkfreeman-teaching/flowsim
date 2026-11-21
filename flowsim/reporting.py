@@ -10,7 +10,8 @@ stock point.
 from __future__ import annotations
 
 import functools
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
+from numbers import Real
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -45,10 +46,10 @@ from flowsim.plots import (
     label,
 )
 from flowsim.records import interval_frame
-from flowsim.validation import number
+from flowsim.validation import boolean, number
 
 if TYPE_CHECKING:
-    from flowsim.results import Experiment
+    from flowsim.results import Experiment, Results
 
 
 @functools.lru_cache(maxsize=256)
@@ -636,6 +637,210 @@ def replication_figure(
     if METRICS[metric].kind == "fraction":
         layout["yaxis"]["tickformat"] = ".0%"
     return {"data": data, "layout": layout}
+
+
+def summary_table(
+    experiments: Mapping[str, Experiment],
+    metrics: Sequence[str],
+    *,
+    comparing: bool,
+    station: str | None = None,
+    stock_point: str | None = None,
+    confidence: float = 0.95,
+    intervals: bool = False,
+    differences: bool = False,
+    reference: str | None = None,
+) -> pl.DataFrame:
+    """Join one or more replication metrics into a wide summary table."""
+    intervals = boolean(intervals, "intervals")
+    differences = boolean(differences, "differences")
+    if isinstance(metrics, str) or not isinstance(metrics, Sequence) or not metrics:
+        raise ValueError("metrics must be a nonempty sequence of metric names.")
+    seen: list[str] = []
+    for name in metrics:
+        if not isinstance(name, str) or name not in METRICS:
+            raise metric_error(str(name))
+        if name in seen:
+            raise ValueError(f"Duplicate metric {name!r} in table request.")
+        seen.append(name)
+    scopes = {METRICS[name].scope for name in seen}
+    if (
+        "station" in scopes
+        and "stock_point" in scopes
+        and (station is None or stock_point is None)
+    ):
+        raise ValueError(
+            "Pass station= and stock_point= when mixing station and stock-point "
+            "metrics in one table."
+        )
+    parts: list[tuple[str, pl.DataFrame, list[str]]] = []
+    all_keys: list[str] = ["scenario"] if comparing else []
+    for name in seen:
+        scope = METRICS[name].scope
+        loc_station = station if scope == "station" else None
+        loc_stock = stock_point if scope == "stock_point" else None
+        if comparing and differences:
+            assert reference is not None
+            frame = comparison_differences(
+                experiments=experiments,
+                reference=reference,
+                metric=name,
+                station=loc_station,
+                stock_point=loc_stock,
+                confidence=confidence,
+            )
+        elif comparing:
+            frame = comparison_intervals(
+                experiments=experiments,
+                metric=name,
+                station=loc_station,
+                stock_point=loc_stock,
+                confidence=confidence,
+            )
+        else:
+            only = next(iter(experiments.values()))
+            frame = experiment_intervals(
+                experiment=only,
+                metric=name,
+                station=loc_station,
+                stock_point=loc_stock,
+                confidence=confidence,
+            )
+        keys: list[str] = []
+        if comparing:
+            keys.append("scenario")
+        if scope == "station" and station is None:
+            keys.append("station")
+        elif scope == "stock_point" and stock_point is None:
+            keys.append("stock_point")
+        for key in keys:
+            if key not in all_keys:
+                all_keys.append(key)
+        value_exprs = [pl.col("mean").alias(name)]
+        if intervals:
+            value_exprs += [
+                pl.col("lower").alias(f"{name}_lower"),
+                pl.col("upper").alias(f"{name}_upper"),
+            ]
+        parts.append((name, frame.select(*keys, *value_exprs), keys))
+    if not all_keys:
+        return pl.concat(
+            [frame for _, frame, _ in parts],
+            how="horizontal",
+        )
+    # Start from the first table that carries the finest key set.
+    parts.sort(key=lambda item: len(item[2]), reverse=True)
+    result = parts[0][1]
+    ordered_cols = [*all_keys]
+    for name in seen:
+        ordered_cols.append(name)
+        if intervals:
+            ordered_cols += [f"{name}_lower", f"{name}_upper"]
+    for _, frame, keys in parts[1:]:
+        if keys:
+            result = result.join(
+                other=frame,
+                on=keys,
+                how="left",
+                maintain_order="left",
+            )
+        else:
+            result = result.join(
+                other=frame,
+                how="cross",
+            )
+    return result.select(ordered_cols)
+
+
+def _eval_custom(fn: Callable[[Results], float | None], run: Results) -> float:
+    value = fn(run)
+    if value is None:
+        return float("nan")
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
+        raise ValueError(
+            f"Custom estimator must return a finite number or None, not {value!r}."
+        )
+    result = float(value)
+    if not np.isfinite(result):
+        raise ValueError(
+            f"Custom estimator must return a finite number or None, not {value!r}."
+        )
+    return result
+
+
+def custom_estimate(
+    experiments: Mapping[str, Experiment],
+    fn: Callable[[Results], float | None],
+    *,
+    comparing: bool,
+    confidence: float = 0.95,
+    differences: bool = False,
+    reference: str | None = None,
+) -> pl.DataFrame:
+    """Estimate a user-supplied per-run function across replications or scenarios."""
+    if not callable(fn):
+        raise ValueError(
+            "fn must be a callable taking one Results and returning a number or None."
+        )
+    level = confidence_level(confidence)
+    differences = boolean(differences, "differences")
+    values = {
+        name: np.array([_eval_custom(fn, run) for run in exp.runs], dtype=float)
+        for name, exp in experiments.items()
+    }
+    schema: dict[str, Any] = {}
+    if comparing:
+        schema["scenario"] = pl.String
+    if comparing and differences:
+        schema["baseline"] = pl.String
+    schema.update(
+        {
+            "runs": pl.Int64,
+            "observed_runs": pl.Int64,
+            "mean": pl.Float64,
+            "lower": pl.Float64,
+            "upper": pl.Float64,
+            "confidence": pl.Float64,
+        }
+    )
+    rows: list[dict[str, Any]] = []
+    if comparing and differences:
+        assert reference is not None
+        base_vals = values[reference]
+        base_seeds = [run.settings.seed for run in experiments[reference].runs]
+        for name, exp in experiments.items():
+            if name == reference:
+                continue
+            if [run.settings.seed for run in exp.runs] != base_seeds:
+                raise ValueError(
+                    "Compared scenarios need identical replication seeds to pair "
+                    "differences."
+                )
+            estimate = interval_estimate(values[name] - base_vals, level)
+            rows.append(
+                {
+                    "scenario": name,
+                    "baseline": reference,
+                    "runs": len(base_vals),
+                    **estimate,
+                    "confidence": level,
+                }
+            )
+    else:
+        for name, vals in values.items():
+            estimate = interval_estimate(vals, level)
+            row: dict[str, Any] = {
+                "runs": len(vals),
+                **estimate,
+                "confidence": level,
+            }
+            if comparing:
+                row["scenario"] = name
+            rows.append(row)
+    return pl.DataFrame(
+        data=rows,
+        schema=schema,
+    )
 
 
 def dashboard(

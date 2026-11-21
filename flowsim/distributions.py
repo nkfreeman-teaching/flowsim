@@ -20,7 +20,7 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, fields, is_dataclass
-from numbers import Real
+from numbers import Integral, Real
 
 import numpy as np
 from scipy.special import zeta
@@ -74,6 +74,74 @@ class Distribution(ABC):
     # Declared only: each subclass supplies these as a field or a property.
     mean: float
     sd: float
+
+    @property
+    def cv(self) -> float:
+        """Return the coefficient of variation (sd / mean), or nan when mean is zero."""
+        return math.nan if self.mean == 0 else self.sd / self.mean
+
+    @property
+    def scv(self) -> float:
+        """Return the squared coefficient of variation ((sd / mean) ** 2), or nan when mean is zero."""
+        return math.nan if self.mean == 0 else (self.sd / self.mean) ** 2
+
+    def sample(
+        self,
+        size: int | tuple[int, ...] = 1,
+        *,
+        seed: int | None = None,
+        rng: np.random.Generator | None = None,
+    ) -> float | np.ndarray:
+        """Draw one value or a NumPy array of independent values.
+
+        Parameters
+        ----------
+        size : int or tuple of int, default 1
+            Number or shape of draws. An integer ``1`` returns a single float;
+            any other positive integer or shape tuple returns a float ndarray.
+        seed : int, optional
+            Seed for a fresh NumPy generator. Cannot be combined with ``rng``.
+        rng : numpy.random.Generator, optional
+            Existing random generator to draw from.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            One float when ``size=1``, otherwise an ndarray of floats.
+
+        Example
+        -------
+        >>> flowsim.lognormal(mean=1, sd=0.2).sample(5, seed=7)
+        """
+        if seed is not None and rng is not None:
+            raise ValueError("Pass either seed or rng, not both.")
+        generator = rng if rng is not None else np.random.default_rng(seed)
+        if isinstance(size, Integral) and not isinstance(size, (bool, np.bool_)):
+            count = int(size)
+            if count < 1:
+                raise ValueError(f"size must be at least 1, not {size!r}.")
+            if count == 1:
+                return self(generator)
+            return np.array([self(generator) for _ in range(count)], dtype=float)
+        if (
+            isinstance(size, tuple)
+            and size
+            and all(
+                isinstance(dim, Integral)
+                and not isinstance(dim, (bool, np.bool_))
+                and int(dim) >= 1
+                for dim in size
+            )
+        ):
+            shape = tuple(int(dim) for dim in size)
+            total = math.prod(shape)
+            return np.array(
+                [self(generator) for _ in range(total)],
+                dtype=float,
+            ).reshape(shape)
+        raise ValueError(
+            f"size must be a positive integer or tuple of positive integers, not {size!r}."
+        )
 
     @abstractmethod
     def __call__(self, rng: np.random.Generator) -> float:
@@ -1086,6 +1154,44 @@ def shifted(distribution: Distribution | dict, *, by: float) -> Shifted:
         )
     (b,) = _real("shifted", example, by=by)
     return Shifted(distribution=distribution, by=b)
+
+
+def from_scv(*, mean: float, scv: float) -> float | Gamma:
+    """Build a duration with the given mean and squared coefficient of variation.
+
+    Returns the constant ``float(mean)`` when ``scv == 0`` and a ``Gamma``
+    distribution with ``shape=1 / scv`` and ``scale=mean * scv`` when
+    ``scv > 0``, which has the requested mean and squared CV exactly.
+
+    Parameters
+    ----------
+    mean : float
+        Mean duration, greater than zero.
+    scv : float
+        Squared coefficient of variation ``(sd / mean) ** 2``, at least zero.
+
+    Returns
+    -------
+    float or Gamma
+        A constant float when ``scv == 0``, otherwise a ``Gamma`` distribution.
+
+    Example
+    -------
+    >>> flowsim.from_scv(mean=4, scv=0.25)
+    Gamma(shape=4, scale=1)
+    """
+    example = "from_scv(mean=4, scv=0.25)"
+    m, c2 = _real("from_scv", example, mean=mean, scv=scv)
+    if m <= 0 or c2 < 0:
+        raise _bad(
+            "from_scv", "mean > 0 and scv >= 0", example, {"mean": mean, "scv": scv}
+        )
+    if c2 == 0:
+        return float(m)
+    return gamma(
+        shape=1.0 / c2,
+        scale=m * c2,
+    )
 
 
 # Constructors by spec name, so shifted() can rebuild an exported inner spec.

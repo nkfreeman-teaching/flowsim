@@ -254,6 +254,15 @@ class Model:
     time_unit : str, default 'minutes'
         A nonempty label for the model's time unit. Every duration, rate, and
         schedule time uses this unit. The label does not convert units.
+    wip_limit : int, optional
+        Line-wide work-in-process cap (CONWIP), at least 1. Limits how many
+        customers may be inside the service network at once across all
+        stations. Requires ``wip_overflow``. Not available on supply chains.
+    wip_overflow : {'reject', 'wait'}, optional
+        What an arrival does when the line is already at ``wip_limit``.
+        ``'wait'`` holds it outside the system in arrival order until a
+        customer exits or abandons; ``'reject'`` records a rejected arrival.
+        Required with ``wip_limit``, and an error without it.
 
     Attributes
     ----------
@@ -282,10 +291,32 @@ class Model:
     >>> results = model.run(duration=480)
     """
 
-    def __init__(self, time_unit: str = "minutes"):
+    def __init__(
+        self,
+        time_unit: str = "minutes",
+        *,
+        wip_limit: int | None = None,
+        wip_overflow: ExternalOverflow | None = None,
+    ):
         if not isinstance(time_unit, str) or not time_unit.strip():
             raise ValueError("time_unit must be a nonempty label.")
         self.time_unit = time_unit.strip()
+        if wip_limit is not None:
+            self.wip_limit: int | None = integer(
+                value=wip_limit,
+                label="WIP limit",
+                minimum=1,
+            )
+            if wip_overflow not in {"reject", "wait"}:
+                raise ValueError(
+                    "A WIP limit requires wip_overflow='reject' or 'wait'."
+                )
+            self.wip_overflow: ExternalOverflow | None = wip_overflow
+        elif wip_overflow is not None:
+            raise ValueError("wip_overflow requires a WIP limit.")
+        else:
+            self.wip_limit = None
+            self.wip_overflow = None
         self._nodes: dict[str, Node] = {}
         self._graph = nx.DiGraph()
         # Each origin's routing rules by customer type, where the key None holds
@@ -838,6 +869,8 @@ class Model:
         """
         if self._supply is not None:
             raise ValueError("This model already has a supply chain.")
+        if self.wip_limit is not None:
+            raise ValueError("A supply chain cannot set wip_limit.")
         if self._has_sources():
             raise ValueError(_ONE_KIND)
         if len(chain) < 2:
@@ -1174,6 +1207,10 @@ class Model:
             ]
         ]
         rows = []
+        if self.wip_limit is not None:
+            rows.append(
+                ("WIP limit", f"{self.wip_limit} (overflow: {self.wip_overflow})")
+            )
         if self._supply is not None:
             chain = [self._supply.demand, *self._supply.stock_points]
             rows.append(
@@ -1231,6 +1268,8 @@ class Model:
             if unlinked_stock or unlinked_demand:
                 raise ValueError(f"{node.name!r} is not in a supply chain.")
         if self._supply is not None:
+            if self.wip_limit is not None:
+                raise ValueError("A supply chain cannot set wip_limit.")
             self._validate_production(self._supply)
             return
         sources = [node for node in self._nodes.values() if node.kind == "source"]

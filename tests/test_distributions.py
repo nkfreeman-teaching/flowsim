@@ -410,3 +410,31 @@ def test_draw_index_gives_the_index_that_numpy_choice_gives(probabilities):
             p=probabilities,
         )
     assert ours.random() == theirs.random()
+
+
+def test_distribution_cv_scv_sample_and_from_scv():
+    dist = flowsim.gamma(
+        shape=4,
+        scale=1.5,
+    )
+    assert dist.cv == pytest.approx(0.5)
+    assert dist.scv == pytest.approx(0.25)
+    assert flowsim.from_scv(mean=6, scv=0.25) == dist
+    assert flowsim.from_scv(mean=6, scv=0) == 6.0
+    assert isinstance(flowsim.from_scv(mean=6, scv=0), float)
+    one = dist.sample(seed=7)
+    assert isinstance(one, float)
+    arr = dist.sample(5, seed=7)
+    assert isinstance(arr, np.ndarray)
+    assert arr.shape == (5,)
+    assert arr[0] == one
+    grid = dist.sample((2, 3), seed=7)
+    assert grid.shape == (2, 3)
+    with pytest.raises(ValueError, match="not both"):
+        dist.sample(
+            2,
+            seed=1,
+            rng=np.random.default_rng(1),
+        )
+    with pytest.raises(ValueError, match="from_scv"):
+        flowsim.from_scv(mean=4, scv=-0.1)

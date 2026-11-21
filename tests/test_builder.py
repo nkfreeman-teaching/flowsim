@@ -15,8 +15,15 @@ from flowsim.builder_page import schema
 from tests.models import branching_service, deterministic_queue
 
 # Public distribution constructors the builder leaves out: sequence data
-# (empirical, discrete), a wrapper (shifted), and demand counts.
-NOT_IN_BUILDER = {"empirical", "discrete", "shifted", "poisson", "negative_binomial"}
+# (empirical, discrete), helpers/wrappers (shifted, from_scv), and demand counts.
+NOT_IN_BUILDER = {
+    "empirical",
+    "discrete",
+    "shifted",
+    "from_scv",
+    "poisson",
+    "negative_binomial",
+}
 
 SCHEMA_SCRIPT = r'<script id="schema" type="application/json">(.*?)</script>'
 

@@ -660,7 +660,7 @@ def test_headline_columns_come_first_in_tables_and_exports(service_run, tmp_path
     ]
     # The schema constant agrees with the table, and no column is lost.
     assert list(STATION_SCHEMA) == service_run.stations.columns
-    assert len(set(service_run.stations.columns)) == 26
+    assert len(set(service_run.stations.columns)) == 29
     service_run.export(tmp_path)
     for table in ["stations", "summary"]:
         exported = pl.read_csv(tmp_path / f"{table}.csv")
@@ -768,6 +768,7 @@ def test_run_settings_are_frozen_and_plumbing_is_private():
         "viewer",
         "export",
         "report",
+        "by_type",
     }
 
 
@@ -783,7 +784,15 @@ def test_experiment_and_comparison_settings_omit_values_that_differ(comparison):
     assert dict(shared.capacities) == {"Check-in": 1, "Service": 1}
     assert comparison.settings.capacities is None
     assert comparison.settings.duration == 60
-    shared_names = {"settings", "intervals", "plot", "viewer", "export"}
+    shared_names = {
+        "settings",
+        "intervals",
+        "table",
+        "estimate",
+        "plot",
+        "viewer",
+        "export",
+    }
     assert public_names(experiment) == shared_names | {
         "runs",
         "summary",
@@ -893,3 +902,70 @@ def test_dropped_records_keep_every_measure_and_explain_the_loss(tmp_path):
             duration=120,
             keep_records="no",
         )
+
+
+def test_experiment_and_comparison_table_estimate_and_by_type():
+    comp = compare(
+        scenarios={
+            "One": service_network(service_capacity=1),
+            "Two": service_network(service_capacity=2),
+        },
+        duration=120,
+        replications=4,
+        seed=7,
+        drain=True,
+    )
+    wide = comp.table(["mean_wip", "throughput", "mean_in_system_time"])
+    assert wide.columns == [
+        "scenario",
+        "mean_wip",
+        "throughput",
+        "mean_in_system_time",
+    ]
+    assert wide.get_column("scenario").to_list() == ["One", "Two"]
+    station_wide = comp.table(
+        ["utilization", "mean_wait"],
+        station="Service",
+        intervals=True,
+    )
+    assert station_wide.columns == [
+        "scenario",
+        "utilization",
+        "utilization_lower",
+        "utilization_upper",
+        "mean_wait",
+        "mean_wait_lower",
+        "mean_wait_upper",
+    ]
+    exp_wide = comp.experiments["One"].table(["mean_wip", "throughput"])
+    assert exp_wide.columns == ["mean_wip", "throughput"]
+    assert exp_wide.height == 1
+    custom = comp.estimate(lambda r: float(r.summary["overtime"].item() <= 30))
+    assert custom.get_column("scenario").to_list() == ["One", "Two"]
+    assert custom.get_column("observed_runs").to_list() == [4, 4]
+    diff_custom = comp.estimate(
+        lambda r: float(r.summary["overtime"].item()),
+        differences=True,
+    )
+    assert diff_custom.get_column("scenario").to_list() == ["Two"]
+    assert diff_custom.get_column("baseline").to_list() == ["One"]
+
+    # Hand-checked by_type()
+    model = Model()
+    arrivals = model.source(
+        name="Orders",
+        interarrival=1,
+        first_arrival=0,
+        limit=2,
+        types={"A": 1.0},
+    )
+    desk = model.station(
+        name="Desk",
+        capacity=1,
+        service_time=2,
+    )
+    model.route([arrivals, desk, model.exit])
+    by_type = model.run(duration=10, drain=True).by_type()
+    assert by_type.get_column("customer_type").to_list() == ["A"]
+    assert by_type.get_column("completed").to_list() == [2]
+    assert by_type.get_column("mean_flow_time").to_list() == [2.5]

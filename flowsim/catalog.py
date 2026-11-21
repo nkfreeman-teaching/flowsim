@@ -124,6 +124,46 @@ METRICS = {
         window=_FLOW_COHORT,
         meaning="Mean time from system arrival to exit for completed customers.",
     ),
+    "mean_in_system_time": Metric(
+        scope="system",
+        label="Mean time inside the system",
+        kind="time",
+        window=_FLOW_COHORT,
+        meaning="Mean time from admission to exit for completed customers, "
+        "excluding time spent waiting outside a full buffer or WIP gate.",
+    ),
+    "p90_flow_time": Metric(
+        scope="system",
+        label="90th percentile flow time",
+        kind="time",
+        window=_FLOW_COHORT,
+        meaning="The 90th percentile of completed cohort customers' flow times "
+        "within the run, interpolated linearly.",
+    ),
+    "p95_flow_time": Metric(
+        scope="system",
+        label="95th percentile flow time",
+        kind="time",
+        window=_FLOW_COHORT,
+        meaning="The 95th percentile of completed cohort customers' flow times "
+        "within the run, interpolated linearly.",
+    ),
+    "p90_total_wait": Metric(
+        scope="system",
+        label="90th percentile total waiting time",
+        kind="time",
+        window=_FLOW_COHORT,
+        meaning="The 90th percentile of completed cohort customers' total waiting "
+        "times within the run, interpolated linearly.",
+    ),
+    "p95_total_wait": Metric(
+        scope="system",
+        label="95th percentile total waiting time",
+        kind="time",
+        window=_FLOW_COHORT,
+        meaning="The 95th percentile of completed cohort customers' total waiting "
+        "times within the run, interpolated linearly.",
+    ),
     "throughput": Metric(
         scope="system",
         label="Throughput during operating hours",
@@ -171,6 +211,22 @@ METRICS = {
         window=_WARMUP_WINDOW,
         meaning="Time-average number of admitted customers in the system, which excludes "
         "customers still waiting outside the first station.",
+    ),
+    "mean_outside_wip": Metric(
+        scope="system",
+        label="Time-average customers waiting outside the system",
+        kind="customers",
+        window=_WARMUP_WINDOW,
+        meaning="Time-average number of non-rejected customers waiting outside "
+        "before admission, including any WIP gate and first-station outside queue.",
+    ),
+    "mean_total_wip": Metric(
+        scope="system",
+        label="Time-average total customers (inside and outside)",
+        kind="customers",
+        window=_WARMUP_WINDOW,
+        meaning="Time-average number of non-rejected customers in the system or "
+        "waiting outside before admission, i.e., mean_wip plus mean_outside_wip.",
     ),
     "rejected": Metric(
         scope="system",
@@ -353,6 +409,14 @@ METRICS = {
         "length, where an occupied server holds a job that is processing, "
         "paused, or blocked.",
     ),
+    "p90_wait": Metric(
+        scope="station",
+        label="90th percentile station waiting time",
+        kind="time",
+        window=_WAIT_COHORT,
+        meaning="The 90th percentile of the run's observed visit waits, interpolated "
+        "linearly between the two nearest order statistics.",
+    ),
     "p95_wait": Metric(
         scope="station",
         label="95th percentile station waiting time",
@@ -379,6 +443,14 @@ METRICS = {
         meaning="Server time spent blocked as a share of installed capacity times the "
         "window length.",
     ),
+    "paused_fraction": Metric(
+        scope="station",
+        label="Paused / installed capacity",
+        kind="fraction",
+        window=_WARMUP_WINDOW,
+        meaning="Server time spent paused (off duty under shift_end='pause' or down "
+        "while holding a job) as a share of installed capacity times the window length.",
+    ),
     "downtime_fraction": Metric(
         scope="station",
         label="Down / installed capacity",
@@ -387,6 +459,14 @@ METRICS = {
         meaning="Server time spent down as a share of installed capacity times the "
         "window length, which can overlap paused and blocked time and so must not "
         "be added to the other shares.",
+    ),
+    "idle_fraction": Metric(
+        scope="station",
+        label="Idle / installed capacity",
+        kind="fraction",
+        window=_WARMUP_WINDOW,
+        meaning="Server time spent scheduled, up, and holding no job as a share of "
+        "installed capacity times the window length.",
     ),
     "staffed_utilization": Metric(
         scope="station",
@@ -690,6 +770,10 @@ _SCHEMA_COLUMNS = {
             "Time from arrival to exit, empty if the customer did not exit.",
             "time unit",
         ),
+        "in_system_time": (
+            "Time from admission to exit, excluding outside wait, empty if the customer did not exit.",
+            "time unit",
+        ),
         "total_wait": (
             "Total of the customer's completed waits before service, including any wait outside the first station.",
             "time unit",
@@ -797,6 +881,10 @@ _SCHEMA_COLUMNS = {
         ),
         "available": (
             "Servers that are on duty and not down, plus off-duty servers that are not down and are finishing a job when shift_end is 'finish'.",
+            "servers",
+        ),
+        "idle": (
+            "Servers that are on duty, up, and holding no job.",
             "servers",
         ),
         "outside": (

@@ -402,6 +402,7 @@ class _Station:
             down=self._down,
             scheduled=self._scheduled,
             available=self._available,
+            idle=self._idle_mask.bit_count(),
             outside=self.outside,
         )
 
@@ -563,6 +564,7 @@ class _Station:
             ticket.visit.abandon_time = now
         ticket.customer.status = Status.ABANDONED
         ticket.customer.abandon_time = now
+        self.run.release_wip()
         self.run.complete_active()
         self.dispatch()
 

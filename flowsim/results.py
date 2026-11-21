@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -50,6 +50,7 @@ from flowsim.records import (
     SHIPMENT_SCHEMA,
     STATE_SCHEMA,
     VISIT_SCHEMA,
+    Status,
     _Activity,
     _Customer,
     _Failure,
@@ -60,11 +61,13 @@ from flowsim.records import (
     _Visit,
 )
 from flowsim.reporting import (
+    custom_estimate,
     dashboard,
     experiment_intervals,
     export_tables,
     interval_figure,
     request_metadata,
+    summary_table,
     write_export,
 )
 from flowsim.viewer import Viewer
@@ -549,6 +552,79 @@ class Results:
             },
         )
 
+    def by_type(self) -> pl.DataFrame:
+        """Summarize post-warmup customer outcomes by ``customer_type``.
+
+        Counts cover arrivals at or after warmup; wait and flow-time averages
+        and percentiles cover completed members of that cohort. Untyped
+        customers (null ``customer_type``) are omitted.
+
+        Returns
+        -------
+        polars.DataFrame
+            One row per customer type present in the run.
+
+        Example
+        -------
+        >>> results.by_type()
+        """
+        self._require_records("by_type()")
+        schema = {
+            "customer_type": pl.String,
+            "arrivals": pl.Int64,
+            "completed": pl.Int64,
+            "rejected": pl.Int64,
+            "abandoned": pl.Int64,
+            "mean_flow_time": pl.Float64,
+            "mean_in_system_time": pl.Float64,
+            "mean_total_wait": pl.Float64,
+            "mean_outside_wait": pl.Float64,
+            "p90_flow_time": pl.Float64,
+            "p95_flow_time": pl.Float64,
+        }
+        typed = self.customers.filter(
+            pl.col("customer_type").is_not_null()
+            & (pl.col("arrival_time") >= self.settings.warmup)
+        )
+        if typed.is_empty():
+            return pl.DataFrame(schema=schema)
+        status = pl.col("status")
+        done = status == Status.COMPLETED
+        return (
+            typed.group_by(
+                "customer_type",
+                maintain_order=True,
+            )
+            .agg(
+                pl.len().alias("arrivals"),
+                done.sum().alias("completed"),
+                (status == Status.REJECTED).sum().alias("rejected"),
+                (status == Status.ABANDONED).sum().alias("abandoned"),
+                pl.col("flow_time").filter(done).mean().alias("mean_flow_time"),
+                pl.col("in_system_time")
+                .filter(done)
+                .mean()
+                .alias("mean_in_system_time"),
+                pl.col("total_wait").filter(done).mean().alias("mean_total_wait"),
+                pl.col("outside_wait").filter(done).mean().alias("mean_outside_wait"),
+                pl.col("flow_time")
+                .filter(done)
+                .quantile(
+                    quantile=0.90,
+                    interpolation="linear",
+                )
+                .alias("p90_flow_time"),
+                pl.col("flow_time")
+                .filter(done)
+                .quantile(
+                    quantile=0.95,
+                    interpolation="linear",
+                )
+                .alias("p95_flow_time"),
+            )
+            .select([pl.col(column).cast(dtype) for column, dtype in schema.items()])
+        )
+
     def plot_queue(self, station: str | None = None) -> Figure:
         """Plot waiting customers and occupied servers over time.
 
@@ -1006,6 +1082,83 @@ class Experiment:
             metric=metric,
             station=station,
             stock_point=stock_point,
+            confidence=confidence,
+        )
+
+    def table(
+        self,
+        metrics: Sequence[str],
+        *,
+        station: str | None = None,
+        stock_point: str | None = None,
+        confidence: float = 0.95,
+        intervals: bool = False,
+    ) -> pl.DataFrame:
+        """Assemble several replication metrics into one wide summary table.
+
+        Parameters
+        ----------
+        metrics : sequence of str
+            Replication metric names from ``flowsim.metrics()``.
+        station : str, optional
+            Station to report for station metrics. Without it, every station.
+        stock_point : str, optional
+            Stock point to report for stock-point metrics. Without it, every
+            stock point.
+        confidence : float, default 0.95
+            Confidence level when ``intervals=True``, strictly between 0 and 1.
+        intervals : bool, default False
+            Whether to include ``<metric>_lower`` and ``<metric>_upper`` columns.
+
+        Returns
+        -------
+        polars.DataFrame
+            One column per requested metric (plus interval bounds when asked).
+
+        Example
+        -------
+        >>> experiment.table(["mean_wip", "throughput", "mean_flow_time"])
+        """
+        return summary_table(
+            experiments={"": self},
+            metrics=metrics,
+            comparing=False,
+            station=station,
+            stock_point=stock_point,
+            confidence=confidence,
+            intervals=intervals,
+        )
+
+    def estimate(
+        self,
+        fn: Callable[[Results], float | None],
+        *,
+        confidence: float = 0.95,
+    ) -> pl.DataFrame:
+        """Estimate a custom per-run quantity across replications with a Student t interval.
+
+        Parameters
+        ----------
+        fn : callable
+            Function taking one ``Results`` and returning a finite float or
+            ``None`` (excluded from the estimate).
+        confidence : float, default 0.95
+            Confidence level of the interval, strictly between 0 and 1.
+
+        Returns
+        -------
+        polars.DataFrame
+            One row with ``runs``, ``observed_runs``, ``mean``, ``lower``,
+            ``upper``, and ``confidence``.
+
+        Example
+        -------
+        >>> experiment.estimate(lambda r: float(r.summary["overtime"].item() <= 30))
+        """
+        return custom_estimate(
+            experiments={"": self},
+            fn=fn,
+            comparing=False,
             confidence=confidence,
         )
 

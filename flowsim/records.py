@@ -17,6 +17,7 @@ CUSTOMER_SCHEMA = {
     "exit_time": pl.Float64,
     "abandon_time": pl.Float64,
     "flow_time": pl.Float64,
+    "in_system_time": pl.Float64,
     "total_wait": pl.Float64,
     "total_blocked": pl.Float64,
     "admitted": pl.Boolean,
@@ -51,6 +52,7 @@ STATE_SCHEMA = {
     "down": pl.Int64,
     "scheduled": pl.Int64,
     "available": pl.Int64,
+    "idle": pl.Int64,
     "outside": pl.Int64,
 }
 ACTIVITY_SCHEMA = {
@@ -87,13 +89,16 @@ _STATION_TYPES = {
     "paused_at_close": pl.Int64,
     "outside_at_close": pl.Int64,
     "mean_wait": pl.Float64,
+    "p90_wait": pl.Float64,
     "p95_wait": pl.Float64,
     "mean_queue": pl.Float64,
     "max_queue": pl.Int64,
     "utilization": pl.Float64,
     "processing_utilization": pl.Float64,
     "blocking_fraction": pl.Float64,
+    "paused_fraction": pl.Float64,
     "downtime_fraction": pl.Float64,
+    "idle_fraction": pl.Float64,
     "mean_scheduled_servers": pl.Float64,
     "mean_available_servers": pl.Float64,
     "mean_outside_queue": pl.Float64,
@@ -149,9 +154,11 @@ AREA_FIELDS = [
     "busy",
     "processing",
     "blocked",
+    "paused",
     "down",
     "scheduled",
     "available",
+    "idle",
     "outside",
 ]
 
@@ -196,6 +203,7 @@ class _Customer:
     exit_time: float | None = None
     abandon_time: float | None = None
     flow_time: float | None = None
+    in_system_time: float | None = None
     total_wait: float = 0.0
     total_blocked: float = 0.0
     admitted: bool = False
@@ -241,6 +249,7 @@ class _State:
     down: int
     scheduled: int
     available: int
+    idle: int
     outside: int
 
 
@@ -343,11 +352,18 @@ _SUMMARY_TYPES = {
     "cohort_completions": pl.Int64,
     "cohort_remaining": pl.Int64,
     "mean_flow_time": pl.Float64,
+    "mean_in_system_time": pl.Float64,
+    "p90_flow_time": pl.Float64,
+    "p95_flow_time": pl.Float64,
     "mean_total_wait": pl.Float64,
+    "p90_total_wait": pl.Float64,
+    "p95_total_wait": pl.Float64,
     "mean_total_blocked": pl.Float64,
     "mean_outside_wait": pl.Float64,
     "throughput": pl.Float64,
     "mean_wip": pl.Float64,
+    "mean_outside_wip": pl.Float64,
+    "mean_total_wip": pl.Float64,
 }
 
 

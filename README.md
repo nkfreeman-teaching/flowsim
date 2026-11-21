@@ -1413,12 +1413,19 @@ model's time unit.
 | --- | --- | --- | --- | --- |
 | `mean_total_wait` | System | time unit | arrivals at or after warmup with observed exits | Mean total time that a completed customer waited before service, summed over its stations and including any wait outside the first station. |
 | `mean_flow_time` | System | time unit | arrivals at or after warmup with observed exits | Mean time from system arrival to exit for completed customers. |
+| `mean_in_system_time` | System | time unit | arrivals at or after warmup with observed exits | Mean time from admission to exit for completed customers, excluding time spent waiting outside a full buffer or WIP gate. |
+| `p90_flow_time` | System | time unit | arrivals at or after warmup with observed exits | The 90th percentile of completed cohort customers' flow times within the run, interpolated linearly. |
+| `p95_flow_time` | System | time unit | arrivals at or after warmup with observed exits | The 95th percentile of completed cohort customers' flow times within the run, interpolated linearly. |
+| `p90_total_wait` | System | time unit | arrivals at or after warmup with observed exits | The 90th percentile of completed cohort customers' total waiting times within the run, interpolated linearly. |
+| `p95_total_wait` | System | time unit | arrivals at or after warmup with observed exits | The 95th percentile of completed cohort customers' total waiting times within the run, interpolated linearly. |
 | `throughput` | System | customers per time unit | [warmup, duration) | Customers who exit during the operating window, whenever they arrived, divided by the window's length. |
 | `remaining_at_close` | System | count | at closing | Customers who were not rejected and had neither exited nor abandoned before closing, including customers still waiting outside the first station. |
 | `completed_at_close` | System | count | before closing | Customers who exit before closing, whenever they arrived. |
 | `remaining` | System | count | at the end of the run | Customers who were not rejected and had neither completed nor abandoned when the run ended. |
 | `overtime` | System | time unit | whole run | Time from closing to the end of the run, i.e., end_time minus duration, which is zero in a run that is not drained and in a drained run whose customers all finish by closing. |
 | `mean_wip` | System | count | [warmup, duration) | Time-average number of admitted customers in the system, which excludes customers still waiting outside the first station. |
+| `mean_outside_wip` | System | count | [warmup, duration) | Time-average number of non-rejected customers waiting outside before admission, including any WIP gate and first-station outside queue. |
+| `mean_total_wip` | System | count | [warmup, duration) | Time-average number of non-rejected customers in the system or waiting outside before admission, i.e., mean_wip plus mean_outside_wip. |
 | `rejected` | System | count | whole run | Arrivals that were rejected on arrival. |
 | `admitted` | System | count | whole run | Customers admitted to the first station, including admissions after closing. A customer routed from the source straight to the exit counts as admitted on arrival. |
 | `measurement_rejected` | System | count | [warmup, duration) | Arrivals at or after warmup that were rejected on arrival. |
@@ -1442,10 +1449,13 @@ model's time unit.
 | `mean_wait` | Station | time unit | visits admitted at or after warmup with observed starts | Mean time from a visit's admission to the station's line until its service started, which excludes time spent outside a full finite buffer or blocked upstream and excludes visits that abandoned or had not started. |
 | `mean_queue` | Station | count | [warmup, duration) | Time-average number of customers waiting in the station's line, excluding customers waiting outside a finite buffer. |
 | `utilization` | Station | share | [warmup, duration) | Occupied-server time as a share of installed capacity times the window length, where an occupied server holds a job that is processing, paused, or blocked. |
+| `p90_wait` | Station | time unit | visits admitted at or after warmup with observed starts | The 90th percentile of the run's observed visit waits, interpolated linearly between the two nearest order statistics. |
 | `p95_wait` | Station | time unit | visits admitted at or after warmup with observed starts | The 95th percentile of the run's observed visit waits, interpolated linearly between the two nearest order statistics, so an interval across replications estimates the expected run-level 95th percentile and not the 95th percentile of all customers' waits pooled. |
 | `processing_utilization` | Station | share | [warmup, duration) | Server time spent processing as a share of installed capacity times the window length. |
 | `blocking_fraction` | Station | share | [warmup, duration) | Server time spent blocked as a share of installed capacity times the window length. |
+| `paused_fraction` | Station | share | [warmup, duration) | Server time spent paused (off duty under shift_end='pause' or down while holding a job) as a share of installed capacity times the window length. |
 | `downtime_fraction` | Station | share | [warmup, duration) | Server time spent down as a share of installed capacity times the window length, which can overlap paused and blocked time and so must not be added to the other shares. |
+| `idle_fraction` | Station | share | [warmup, duration) | Server time spent scheduled, up, and holding no job as a share of installed capacity times the window length. |
 | `staffed_utilization` | Station | share | [warmup, duration) | Server time spent processing as a share of available-server time, which is missing when no server was available at any time in the window. |
 | `mean_scheduled_servers` | Station | servers | [warmup, duration) | Time-average number of servers on duty under the staffing schedule, which equals the capacity at a station without a staffing schedule and includes servers that are down. |
 | `mean_available_servers` | Station | servers | [warmup, duration) | Time-average number of servers that are on duty and not down, plus off-duty servers that are not down and are finishing a job at a station whose shifts end with shift_end='finish'. |
@@ -1494,6 +1504,7 @@ metric, and "data unit" means the units of the fitted data.
 | `exit_time` | time unit | Time the customer left the network, empty if it did not complete. |
 | `abandon_time` | time unit | Time the customer abandoned before service, empty if it did not abandon. |
 | `flow_time` | time unit | Time from arrival to exit, empty if the customer did not exit. |
+| `in_system_time` | time unit | Time from admission to exit, excluding outside wait, empty if the customer did not exit. |
 | `total_wait` | time unit | Total of the customer's completed waits before service, including any wait outside the first station. |
 | `total_blocked` | time unit | Total time the customer was held at a station after service because the next station could not accept it, counting only blocking that had ended. |
 | `admitted` | true/false | Whether the customer was admitted to the first station. A customer routed from the source straight to the exit counts as admitted on arrival. |
@@ -1540,6 +1551,7 @@ metric, and "data unit" means the units of the fitted data.
 | `down` | servers | Servers that are down for repair. |
 | `scheduled` | servers | Servers on duty under the staffing schedule, which equals the capacity at a station without a staffing schedule and includes servers that are down. |
 | `available` | servers | Servers that are on duty and not down, plus off-duty servers that are not down and are finishing a job when shift_end is 'finish'. |
+| `idle` | servers | Servers that are on duty, up, and holding no job. |
 | `outside` | count | Arriving customers waiting outside the station's full finite buffer for admission, which excludes upstream customers blocked from entering. |
 
 </details>
