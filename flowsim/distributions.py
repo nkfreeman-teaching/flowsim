@@ -142,7 +142,7 @@ class Exponential(Distribution):
     def sd(self) -> float:
         return self.mean
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(rng.exponential(scale=self.mean))
 
     def describe(self) -> str:
@@ -190,7 +190,7 @@ class Uniform(Distribution):
     def sd(self) -> float:
         return (self.high - self.low) / math.sqrt(12)
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(rng.uniform(low=self.low, high=self.high))
 
     def describe(self) -> str:
@@ -257,7 +257,7 @@ class Triangular(Distribution):
         a, b, c = self.low, self.mode, self.high
         return math.hypot(a - b, a - c, b - c) / 6
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(rng.triangular(left=self.low, mode=self.mode, right=self.high))
 
     def describe(self) -> str:
@@ -317,7 +317,7 @@ class Pert(Distribution):
         spread = self.high - self.low
         return spread * math.sqrt(a * b / ((a + b) ** 2 * (a + b + 1)))
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         spread = self.high - self.low
         return float(self.low + spread * rng.beta(a=self._alpha, b=self._beta))
 
@@ -359,7 +359,7 @@ class Normal(Distribution):
     mean: float
     sd: float
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(rng.normal(loc=self.mean, scale=self.sd))
 
     def describe(self) -> str:
@@ -419,7 +419,7 @@ class Lognormal(Distribution):
     def _mu(self) -> float:
         return math.log(self.mean) - self._sigma**2 / 2
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(rng.lognormal(mean=self._mu, sigma=self._sigma))
 
     def describe(self) -> str:
@@ -476,7 +476,7 @@ class Gamma(Distribution):
     def sd(self) -> float:
         return math.sqrt(self.shape) * self.scale
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(rng.gamma(shape=self.shape, scale=self.scale))
 
     def describe(self) -> str:
@@ -550,7 +550,7 @@ class Weibull(Distribution):
         growth = math.expm1(log_ratio) / log_ratio if log_ratio > 0 else 1.0
         return self.scale * math.gamma(1 + x) * x * math.sqrt(series * growth)
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(self.scale * rng.weibull(a=self.shape))
 
     def describe(self) -> str:
@@ -601,7 +601,7 @@ class Erlang(Distribution):
     def sd(self) -> float:
         return self.mean / math.sqrt(self.k)
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(rng.gamma(shape=self.k, scale=self.mean / self.k))
 
     def describe(self) -> str:
@@ -657,7 +657,7 @@ class Beta(Distribution):
         spread = self.high - self.low
         return spread * math.sqrt(self.a * self.b / (total**2 * (total + 1)))
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         spread = self.high - self.low
         return float(self.low + spread * rng.beta(a=self.a, b=self.b))
 
@@ -716,7 +716,7 @@ class Empirical(Distribution):
     def sd(self) -> float:
         return float(np.std(self.values, ddof=0))
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return self.values[int(rng.integers(len(self.values)))]
 
     def describe(self) -> str:
@@ -783,7 +783,7 @@ class Poisson(Distribution):
     def sd(self) -> float:
         return math.sqrt(self.mean)
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(rng.poisson(lam=self.mean))
 
     def describe(self) -> str:
@@ -838,7 +838,7 @@ class Discrete(Distribution):
     def _shares(self) -> list[float]:
         return cumulative_shares(self.probabilities)
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return self.values[draw_index(self._shares, rng)]
 
     def describe(self) -> str:
@@ -946,7 +946,7 @@ class NegativeBinomial(Distribution):
         # whose mean n (1 - p) / p equals mean when p = mean / variance.
         return self.mean / self.sd**2
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(rng.negative_binomial(n=self._n, p=self._p))
 
     def describe(self) -> str:
@@ -1009,7 +1009,7 @@ class Shifted(Distribution):
     def sd(self) -> float:
         return self.distribution.sd
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return float(self.by + self.distribution(rng))
 
     def describe(self) -> str:

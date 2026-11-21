@@ -175,7 +175,7 @@ class Fit(Distribution):
         """
         return self.distribution.sd
 
-    def __call__(self, rng):
+    def __call__(self, rng: np.random.Generator) -> float:
         return self.distribution(rng)
 
     def describe(self) -> str:
@@ -579,7 +579,7 @@ class Fits:
 
 
 def fit_all(
-    data,
+    data: Sequence[float] | np.ndarray | pl.Series,
     families: Sequence[str] | None = None,
     *,
     shifted: bool = False,
@@ -669,7 +669,7 @@ def fit_all(
 
 
 def best_fit(
-    data,
+    data: Sequence[float] | np.ndarray | pl.Series,
     families: Sequence[str] | None = None,
     *,
     shifted: bool = False,
@@ -847,7 +847,10 @@ def _fit_count(values: np.ndarray, family: str) -> Fit:
     )
 
 
-def _data(data, discrete: bool) -> np.ndarray:
+def _data(
+    data: Sequence[float] | np.ndarray | pl.Series,
+    discrete: bool,
+) -> np.ndarray:
     try:
         raw = np.asarray(data)
     except (TypeError, ValueError):

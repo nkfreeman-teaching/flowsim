@@ -65,6 +65,18 @@ SCOPES = {
 }
 
 
+MetricKind = Literal[
+    "time",
+    "rate",
+    "fraction",
+    "servers",
+    "customers",
+    "units",
+    "variance",
+    "ratio",
+]
+
+
 @dataclass(frozen=True)
 class Metric:
     """A replication metric: where it comes from, how it reads, and what it means.
@@ -75,9 +87,9 @@ class Metric:
     "stock_points"), and the window names the cohort or period it measures.
     """
 
-    scope: str
+    scope: Scope
     label: str
-    kind: str
+    kind: MetricKind
     meaning: str
     window: str
 

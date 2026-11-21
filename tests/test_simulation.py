@@ -1337,7 +1337,7 @@ def test_imports_follow_the_dependency_direction():
         if isinstance(function, ast.FunctionDef)
         for module in modules(ast.walk(function))
     }
-    assert local == {("reporting.py", "flowsim.results")}
+    assert not local
 
 
 def test_a_station_without_an_onward_route_names_the_station():

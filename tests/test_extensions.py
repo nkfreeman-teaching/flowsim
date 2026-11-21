@@ -843,10 +843,13 @@ def test_invalid_rate_schedules(points, message):
             {"staffing": [(0, 2)], "shift_end": "finish"},
             "cannot exceed installed capacity 1",
         ),
-        ({"buffer": 0}, "A finite buffer requires external_overflow"),
         (
             {"buffer": -1, "external_overflow": "wait"},
             "Buffer capacity must be an integer of at least 0",
+        ),
+        (
+            {"buffer": 0, "external_overflow": "drop"},
+            "external_overflow must be 'reject' or 'wait'",
         ),
         ({"time_to_failure": 1}, "Provide both time_to_failure and repair_time"),
         (
@@ -1196,3 +1199,37 @@ def test_extreme_arrival_rate_raises_instead_of_hanging():
     model.route([arrivals, desk, model.exit])
     with pytest.raises(ValueError, match="too large for time to advance"):
         model.run(duration=10)
+
+
+def test_interior_finite_buffer_does_not_require_external_overflow():
+    # Source -> First (buffer=None) -> Second (buffer=0, no external_overflow) -> Exit.
+    # Customer 1 arrives at 0, finishes First at 1, enters Second (1..4).
+    # Customer 2 arrives at 1, finishes First at 2, blocks First until 4, enters Second (4..7).
+    model = Model()
+    parts = model.source(
+        name="Parts",
+        interarrival=1,
+        first_arrival=0,
+        limit=2,
+    )
+    first = model.station(
+        name="First",
+        capacity=1,
+        service_time=1,
+    )
+    second = model.station(
+        name="Second",
+        capacity=1,
+        service_time=3,
+        buffer=0,
+    )
+    model.route([parts, first, second, model.exit])
+    result = model.run(
+        duration=10,
+        drain=True,
+    )
+    assert result.summary.get_column("completed").to_list() == [2]
+    assert result.summary.get_column("mean_total_blocked").to_list() == [1.0]
+    # A finite-buffer station fed directly by a source still requires external_overflow.
+    with pytest.raises(ValueError, match="external_overflow"):
+        single_station(buffer=0).validate()

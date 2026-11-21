@@ -17,6 +17,29 @@ Sampler = Callable[[np.random.Generator], float]
 Duration = float | Sampler
 
 
+def boolean(value: object, label: str) -> bool:
+    """Require a boolean (Python bool or NumPy bool_)."""
+    if not isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{label} must be True or False.")
+    return bool(value)
+
+
+def nonempty_name(
+    value: object,
+    label: str,
+    *,
+    message: str | None = None,
+) -> str:
+    """Require a nonempty non-whitespace string."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            message
+            if message is not None
+            else f"{label} must be a nonempty string, not {value!r}."
+        )
+    return value
+
+
 def number(value: object, label: str, *, positive: bool = False) -> float:
     """Require a finite nonnegative scalar, or a positive one if positive is set."""
     if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):

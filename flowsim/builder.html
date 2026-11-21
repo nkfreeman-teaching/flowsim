@@ -1731,6 +1731,14 @@ function sourceProblems(node, found) {
   else if (Math.abs(total - 1) > BRANCH_SUM_TOLERANCE) found.push(`${node.name}: type probabilities sum to ${shownSum(total)}, not 1.`);
 }
 
+function isInteriorStation(node) {
+  const incoming = state.edges.filter((edge) => edge.to === node.id);
+  return incoming.length > 0 && incoming.every((edge) => {
+    const origin = nodeById(edge.from);
+    return origin && origin.kind !== "source";
+  });
+}
+
 function stationProblems(node, found) {
   const values = node.values;
   const name = node.name;
@@ -1747,7 +1755,9 @@ function stationProblems(node, found) {
   const buffered = String(values.buffer).trim() !== "";
   if (buffered) {
     checkNumber(values.buffer, PARAMETERS.station.get("buffer"), `${name}: buffer`, found);
-    if (!values.external_overflow) found.push(`${name}: choose what an arrival does when the buffer is full (external_overflow).`);
+    if (!values.external_overflow && !isInteriorStation(node)) {
+      found.push(`${name}: choose what an arrival does when the buffer is full (external_overflow).`);
+    }
   }
   if (values.abandon_on) {
     checkTypedDurations(node, "patience", "patience_by_type", `${name}: patience`, found);
@@ -2168,7 +2178,9 @@ function stationArgs(node, used) {
   }
   if (String(values.buffer).trim() !== "") {
     args.push(["buffer", pyNumber(values.buffer, "integer")]);
-    args.push(["external_overflow", choiceCode(values.external_overflow)]);
+    if (values.external_overflow || !isInteriorStation(node)) {
+      args.push(["external_overflow", choiceCode(values.external_overflow)]);
+    }
   }
   if (values.failures_on) {
     args.push(["time_to_failure", durationCall(values.time_to_failure, used)]);

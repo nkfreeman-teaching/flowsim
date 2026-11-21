@@ -503,11 +503,13 @@ print(
 )
 ```
 
-The overflow rule is required with a finite buffer and applies to arrivals from
-a source. `external_overflow="reject"` records a rejected arrival when the first
-station has no room. `external_overflow="wait"` holds the arrival in a separate
-outside queue until admission is possible, and that queue does not use the
-inside buffer. Outside arrivals and blocked transfers from upstream stations
+The overflow rule applies to arrivals from a source and is required on any
+finite-buffer station that receives arrivals directly from a source (interior
+stations only receive blocked transfers from upstream stations, so
+`external_overflow` is optional there). `external_overflow="reject"` records a
+rejected arrival when the first station has no room. `external_overflow="wait"`
+holds the arrival in a separate outside queue until admission is possible, and
+that queue does not use the inside buffer. Outside arrivals and blocked transfers from upstream stations
 wait in one admission line, and the station admits them in the order they asked
 to enter. `arrivals` counts attempts, with
 `arrivals = completed + remaining + rejected + abandoned`, where `abandoned` is

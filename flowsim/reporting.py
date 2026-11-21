@@ -9,17 +9,24 @@ stock point.
 
 from __future__ import annotations
 
-import json
-import math
+import functools
 from collections.abc import Mapping
-from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import polars as pl
 from scipy.stats import t
 
-from flowsim import __version__
+from flowsim._dashboard import build_dashboard, scenario_runs
+from flowsim._export import (
+    EXPORT_FILE_NAMES,
+    export_tables,
+    remove_stale_exports,
+    require_flowsim_folder,
+    write_export,
+    write_text,
+)
+from flowsim._export import request_metadata as _request_metadata
 from flowsim.catalog import (
     METRICS,
     SCOPES,
@@ -34,19 +41,19 @@ from flowsim.plots import (
     BLUE,
     STAGE_COLORS,
     base_layout,
-    building_page,
     dashed_line,
-    fill_template,
     label,
-    page_json,
-    page_parts,
-    run_payload,
 )
 from flowsim.records import interval_frame
 from flowsim.validation import number
 
 if TYPE_CHECKING:
     from flowsim.results import Experiment
+
+
+@functools.lru_cache(maxsize=256)
+def _t_critical(confidence: float, df: int) -> float:
+    return float(t.ppf((1 + confidence) / 2, df=df))
 
 
 def confidence_level(value: float) -> float:
@@ -70,9 +77,7 @@ def interval_estimate(values: np.ndarray | list[float], confidence: float) -> di
     # Estimates have the metric's units. Standard error divides by sqrt(runs).
     if mean is not None and count >= 2:
         half_width = float(
-            t.ppf((1 + confidence) / 2, df=count - 1)
-            * values.std(ddof=1)
-            / np.sqrt(count)
+            _t_critical(confidence, count - 1) * values.std(ddof=1) / np.sqrt(count)
         )
         lower = mean - half_width
         upper = mean + half_width
@@ -633,154 +638,6 @@ def replication_figure(
     return {"data": data, "layout": layout}
 
 
-# Metric menu headings, in catalog order.
-_GROUPS = [(scope, facts.menu) for scope, facts in SCOPES.items()]
-
-
-def scenario_runs(
-    values: Mapping[str, Mapping[str | None, np.ndarray]],
-    place: str | None,
-) -> dict[str | None, list[float | None]]:
-    """Return each scenario's run values at one location, None where missing.
-
-    The values come from scenario_values. A scenario without the location is
-    left out.
-    """
-    return {
-        name: [
-            None if not math.isfinite(value) else float(value) for value in runs[place]
-        ]
-        for name, runs in values.items()
-        if place in runs
-    }
-
-
-def metric_entry(
-    experiments: Mapping[str, Experiment],
-    metric: str,
-    comparing: bool,
-    level: float,
-) -> dict | None:
-    """Return one metric's dashboard views, one per location, or None.
-
-    None means no scenario's model can measure the metric. Each view holds
-    the interval table and figure, the per-replication figure, and, in a
-    comparison, the paired differences from each scenario as the baseline.
-    The run values are read once and feed all of them.
-    """
-    try:
-        found = scenario_locations(
-            experiments=experiments,
-            metric=metric,
-            station=None,
-            stock_point=None,
-        )
-    except Inapplicable:
-        return None
-    places = list(dict.fromkeys(place for chosen in found.values() for place in chosen))
-    first = next(iter(experiments.values()))
-    settings = first.settings
-    column = location_column(metric)
-    if comparing:
-        values = scenario_values(
-            experiments=experiments,
-            metric=metric,
-            found=found,
-        )
-    else:
-        # An experiment's errors name no scenario, as experiment.intervals().
-        values = {
-            "": run_values(
-                experiment=first,
-                metric=metric,
-                names=found[""],
-            )
-        }
-    table = scenario_intervals(
-        values=values,
-        metric=metric,
-        level=level,
-    )
-    if comparing:
-        changes = {
-            baseline: paired_differences(
-                experiments=experiments,
-                values=values,
-                reference=baseline,
-                metric=metric,
-                level=level,
-            )
-            for baseline in experiments
-        }
-    else:
-        # An experiment's table has no scenario column, as experiment.intervals().
-        table = table.drop("scenario")
-        changes = {}
-    views = []
-    for place in places:
-        here = pl.col(column).is_null() if place is None else pl.col(column) == place
-        chosen = table.filter(here)
-        runs = scenario_runs(
-            values=values,
-            place=place,
-        )
-        paired = {baseline: rows.filter(here) for baseline, rows in changes.items()}
-        views.append(
-            {
-                "title": METRICS[metric].label
-                + ("" if place is None else f" at {place}"),
-                "intervals": chosen.to_dicts(),
-                "means": interval_figure(
-                    table=chosen,
-                    metric=metric,
-                    time_unit=settings.time_unit,
-                ),
-                "runs": replication_figure(
-                    values=runs if comparing else {None: runs[""]},
-                    scenarios=list(experiments) if comparing else [None],
-                    metric=metric,
-                    place=place,
-                    time_unit=settings.time_unit,
-                ),
-                "changes": {
-                    baseline: None
-                    if rows.is_empty()
-                    else {
-                        "intervals": rows.to_dicts(),
-                        "figure": interval_figure(
-                            table=rows,
-                            metric=metric,
-                            time_unit=settings.time_unit,
-                            differences=True,
-                        ),
-                    }
-                    for baseline, rows in paired.items()
-                },
-            }
-        )
-    kind = METRICS[metric].kind
-    return {
-        "name": metric,
-        "label": METRICS[metric].label,
-        "scope": METRICS[metric].scope,
-        "location_column": column,
-        "fraction": kind == "fraction",
-        "units": "percent"
-        if kind == "fraction"
-        else metric_units(metric, settings.time_unit),
-        "meaning": METRICS[metric].meaning,
-        "window": window_text(
-            metric,
-            duration=settings.duration,
-            warmup=settings.warmup,
-            drain=settings.drain,
-            time_unit=settings.time_unit,
-        ),
-        "locations": places,
-        "views": views,
-    }
-
-
 def dashboard(
     experiments: Mapping[str, Experiment],
     *,
@@ -791,215 +648,27 @@ def dashboard(
     confidence: float,
     reference: str | None,
 ) -> str:
-    """Build the offline page of every applicable metric and every kept run.
-
-    For each metric that applies to some scenario, in catalog order, the page
-    holds the views from metric_entry. It embeds Plotly once and each run's
-    records when every run kept them, in a script element per run that the
-    page parses only when the run opens. The caller has checked the request,
-    which names the metric, location, and baseline shown first. An
-    experiment's single entry has the key "".
-    """
-    # PageExperiment subclasses Experiment, whose methods call this module,
-    # so results.py imports reporting.py and this one class comes in late.
-    from flowsim.results import PageExperiment
-
-    level = confidence_level(confidence)
-    experiments = {
-        name: PageExperiment(experiment.runs)
-        for name, experiment in experiments.items()
-    }
-    # Run views built here hold their record columns as typed arrays.
-    with building_page():
-        entries = [
-            entry
-            for name in METRICS
-            if (
-                entry := metric_entry(
-                    experiments=experiments,
-                    metric=name,
-                    comparing=comparing,
-                    level=level,
-                )
-            )
-            is not None
-        ]
-        records = all(
-            run.records_kept
-            for experiment in experiments.values()
-            for run in experiment.runs
-        )
-        runs = []
-        run_data = []
-        for scenario, (name, experiment) in enumerate(experiments.items()):
-            prefix = f"{name}, replication" if comparing else "Replication"
-            runs.append(
-                [
-                    {"label": f"{prefix} {index} (seed {run.settings.seed})"}
-                    for index, run in enumerate(experiment.runs, start=1)
-                ]
-            )
-            if records:
-                run_data += [
-                    f'<script id="run-{scenario}-{index}" type="application/json">'
-                    f"{page_json(run_payload(run))}</script>"
-                    for index, run in enumerate(experiment.runs)
-                ]
-        payload = {
-            "scenarios": list(experiments) if comparing else [None],
-            "replications": len(next(iter(experiments.values())).runs),
-            "confidence_text": f"{level * 100:g}%",
-            "groups": _GROUPS,
-            "metrics": entries,
-            "initial": {
-                "metric": metric,
-                "location": {"station": station, "stock_point": stock_point}.get(
-                    METRICS[metric].scope
-                ),
-                "baseline": reference,
-            },
-            "records": records,
-            "runs": runs,
-        }
-    return fill_template(
-        "dashboard.html",
-        {
-            **page_parts(),
-            "HEADING": "Scenario comparison" if comparing else "Replication intervals",
-            "DASHBOARD_JSON": page_json(payload),
-            "RUN_DATA": "\n".join(run_data),
+    """Build the offline page of every applicable metric and every kept run."""
+    return build_dashboard(
+        experiments=experiments,
+        comparing=comparing,
+        metric=metric,
+        station=station,
+        stock_point=stock_point,
+        level=confidence_level(confidence),
+        reference=reference,
+        helpers={
+            "scenario_locations": scenario_locations,
+            "location_column": location_column,
+            "scenario_values": scenario_values,
+            "run_values": run_values,
+            "scenario_intervals": scenario_intervals,
+            "paired_differences": paired_differences,
+            "interval_figure": interval_figure,
+            "replication_figure": replication_figure,
+            "window_text": window_text,
         },
     )
-
-
-def write_text(path: str | Path, text: str) -> None:
-    destination = Path(path)
-    destination.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-    destination.write_text(
-        data=text,
-        encoding="utf-8",
-    )
-
-
-# Every file name a FlowSim export can write. An export removes the ones it did
-# not write, so a folder never mixes files from two different exports.
-EXPORT_FILE_NAMES = frozenset(
-    {
-        "customers.csv",
-        "visits.csv",
-        "states.csv",
-        "stations.csv",
-        "summary.csv",
-        "activities.csv",
-        "failures.csv",
-        "inventory.csv",
-        "shipments.csv",
-        "stock_points.csv",
-        "metadata.json",
-        "runs.csv",
-        "intervals.csv",
-        "differences.csv",
-    }
-)
-
-
-def require_flowsim_folder(destination: Path) -> None:
-    """Refuse a folder that holds export-named files FlowSim did not write.
-
-    A folder counts as FlowSim's when its metadata.json parses as a JSON object
-    with a "flowsim_version" key. A missing folder or one without export-named
-    files is fine.
-    """
-    if not destination.is_dir():
-        return
-    clashing = sorted(
-        name for name in EXPORT_FILE_NAMES if (destination / name).is_file()
-    )
-    if not clashing:
-        return
-    try:
-        metadata = json.loads((destination / "metadata.json").read_text())
-    except (OSError, ValueError):
-        metadata = None
-    if isinstance(metadata, dict) and "flowsim_version" in metadata:
-        return
-    raise ValueError(
-        f"{destination} holds {', '.join(clashing)}, but no FlowSim "
-        "metadata.json, so FlowSim cannot tell whether it wrote them and will "
-        "not replace or delete them. Export into an empty folder or one an "
-        "earlier FlowSim export wrote."
-    )
-
-
-def remove_stale_exports(destination: Path, written: set[str]) -> None:
-    """Delete FlowSim export files in destination that this export did not write."""
-    for name in EXPORT_FILE_NAMES - written:
-        stale = destination / name
-        if stale.is_file():
-            stale.unlink()
-
-
-def _write_metadata(path: str | Path, data: dict) -> None:
-    """Write export metadata as JSON, stamped with the FlowSim version.
-
-    The file is written beside its destination and then renamed over it, so an
-    interrupted write keeps the earlier metadata, which marks the folder as
-    FlowSim's for require_flowsim_folder.
-    """
-    destination = Path(path)
-    partial = destination.with_name(destination.name + ".partial")
-    write_text(partial, json.dumps({"flowsim_version": __version__, **data}, indent=2))
-    partial.replace(destination)
-
-
-def export_tables(
-    directory: str | Path,
-    *,
-    summary: pl.DataFrame,
-    stations: pl.DataFrame,
-    stock_points: pl.DataFrame | None,
-    intervals: pl.DataFrame,
-    differences: pl.DataFrame | None,
-    metadata: dict,
-) -> Path:
-    """Write pooled run tables, intervals, and metadata, removing stale files."""
-    tables = {
-        "runs.csv": summary,
-        "stations.csv": stations,
-        "stock_points.csv": stock_points,
-        "intervals.csv": intervals,
-        "differences.csv": differences,
-    }
-    return write_export(
-        directory=directory,
-        tables={name: table for name, table in tables.items() if table is not None},
-        metadata=metadata,
-    )
-
-
-def write_export(
-    directory: str | Path,
-    tables: dict[str, pl.DataFrame],
-    metadata: dict,
-) -> Path:
-    """Write metadata.json and each table to its file name, removing stale files."""
-    destination = Path(directory)
-    require_flowsim_folder(destination)
-    destination.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-    # Metadata goes first, so a request that cannot be written replaces no
-    # tables from an earlier export, and an export interrupted while writing
-    # tables leaves a folder that a retry still recognizes as FlowSim's.
-    _write_metadata(destination / "metadata.json", metadata)
-    for name, table in tables.items():
-        table.write_csv(destination / name)
-    remove_stale_exports(destination, set(tables) | {"metadata.json"})
-    return destination
 
 
 def request_metadata(
@@ -1008,18 +677,28 @@ def request_metadata(
     station: str | None,
     stock_point: str | None,
     confidence: float,
-) -> dict:
+) -> dict[str, Any]:
     """Describe an export's request, settings, and replication seeds."""
-    settings = experiment.settings
-    return {
-        "metric": metric,
-        "station": station,
-        "stock_point": stock_point,
-        # The validated level is a Python float, as JSON needs, for any real input.
-        "confidence": confidence_level(confidence),
-        "time_unit": settings.time_unit,
-        "duration": settings.duration,
-        "warmup": settings.warmup,
-        "drain": settings.drain,
-        "replication_seeds": [run.settings.seed for run in experiment.runs],
-    }
+    return _request_metadata(
+        experiment=experiment,
+        metric=metric,
+        station=station,
+        stock_point=stock_point,
+        confidence=confidence,
+        level=confidence_level(confidence),
+    )
+
+
+__all__ = [
+    "EXPORT_FILE_NAMES",
+    "confidence_level",
+    "dashboard",
+    "export_tables",
+    "interval_estimate",
+    "remove_stale_exports",
+    "request_metadata",
+    "require_flowsim_folder",
+    "scenario_runs",
+    "write_export",
+    "write_text",
+]

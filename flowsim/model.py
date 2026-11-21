@@ -6,7 +6,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import networkx as nx
 import numpy as np
@@ -22,7 +22,7 @@ from flowsim.results import (
     Results,
 )
 from flowsim.schedules import validate_schedule
-from flowsim.validation import Duration, integer, number
+from flowsim.validation import Duration, boolean, integer, number
 from flowsim.validation import duration as duration_check
 
 if TYPE_CHECKING:
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
 # Closed string choices. Each station and stock-point argument that takes one
 # is still validated at run time.
+NodeKind = Literal["source", "station", "exit", "demand", "stock_point"]
 ShiftEnd = Literal["finish", "pause"]
 ExternalOverflow = Literal["reject", "wait"]
 FailureClock = Literal["available", "busy"]
@@ -70,7 +71,7 @@ class Node:
     """
 
     name: str
-    kind: str
+    kind: NodeKind
     interarrival: Duration | None = None
     # A station's one duration, or a read-only mapping from customer type to
     # duration.
@@ -185,7 +186,10 @@ def _type_mix(types: object) -> Mapping[str, float]:
     return MappingProxyType(probabilities)
 
 
-def _typed_durations(times: Mapping, label: str) -> Mapping[str, Duration]:
+def _typed_durations(
+    times: Mapping[Any, Any],
+    label: str,
+) -> Mapping[str, Duration]:
     """Check a mapping from customer type to duration, labeled like "Service time"."""
     if not times:
         raise ValueError(f"A {label.lower()} mapping needs at least one customer type.")
@@ -343,7 +347,7 @@ class Model:
     def _has_sources(self) -> bool:
         return any(node.kind == "source" for node in self._nodes.values())
 
-    def _owned(self, node: Node) -> None:
+    def _owned(self, node: object) -> None:
         if isinstance(node, str):
             raise ValueError(
                 "Routes take the nodes that model.source(...), model.station(...), "
@@ -460,7 +464,7 @@ class Model:
         capacity: int,
         service_time: Duration | Mapping[str, Duration],
         *,
-        staffing: Sequence[tuple[float, float]] | None = None,
+        staffing: Sequence[tuple[float, int]] | None = None,
         shift_end: ShiftEnd | None = None,
         buffer: int | None = None,
         external_overflow: ExternalOverflow | None = None,
@@ -513,13 +517,15 @@ class Model:
             scheduled again. Required with staffing, and an error without it.
         buffer : int, optional
             Maximum number of jobs waiting, at least 0 (0 allows direct service
-            only). Without it, the waiting room is unlimited. Requires
-            external_overflow.
+            only). Without it, the waiting room is unlimited. Stations that
+            receive arrivals directly from a source (or jobs from a producing
+            stock point) also require external_overflow.
         external_overflow : {'reject', 'wait'}, optional
             What a source arrival does when the buffer is full. 'reject'
             records a rejected arrival. 'wait' holds it in an outside queue
-            until admission is possible. Required with buffer, and an error
-            without it.
+            until admission is possible. Required on finite-buffer stations
+            fed directly by a source, optional on interior stations, and an
+            error without a finite buffer.
         time_to_failure : float or callable, optional
             Lifetime of a server before it fails, a positive duration in model
             time units. Requires repair_time and failure_clock.
@@ -592,10 +598,11 @@ class Model:
                 label="Buffer capacity",
                 minimum=0,
             )
-            if external_overflow not in {"reject", "wait"}:
-                raise ValueError(
-                    "A finite buffer requires external_overflow='reject' or 'wait'."
-                )
+            if external_overflow is not None and external_overflow not in {
+                "reject",
+                "wait",
+            }:
+                raise ValueError("external_overflow must be 'reject' or 'wait'.")
         elif external_overflow is not None:
             raise ValueError("external_overflow requires a finite buffer.")
         if (time_to_failure is None) != (repair_time is None):
@@ -1240,17 +1247,28 @@ class Model:
                     f"{node.name!r} has no onward route. End its route with "
                     "model.exit, e.g. model.route([..., service, model.exit])."
                 )
+        can_exit = nx.ancestors(self._graph, self.exit.name) | {self.exit.name}
+        source_names = {source.name for source in sources}
         for node in self._nodes.values():
             if node.kind not in NETWORK_KINDS:
                 continue
             if node.name not in reachable:
                 raise ValueError(f"{node.name!r} is unreachable from every source.")
-            if node is not self.exit and not nx.has_path(
-                G=self._graph,
-                source=node.name,
-                target=self.exit.name,
-            ):
+            if node is not self.exit and node.name not in can_exit:
                 raise ValueError(f"{node.name!r} needs a route to the exit.")
+            if (
+                node.kind == "station"
+                and node.buffer is not None
+                and node.external_overflow is None
+                and any(
+                    pred in source_names for pred in self._graph.predecessors(node.name)
+                )
+            ):
+                raise ValueError(
+                    f"Station {node.name!r} has a finite buffer and receives "
+                    "arrivals from a source, so it requires "
+                    "external_overflow='reject' or 'wait'."
+                )
         for source in sources:
             self._check_types(source)
 
@@ -1283,27 +1301,17 @@ class Model:
                     f"by returning to {top.name!r}, e.g. "
                     "model.route([factory, ..., station, factory])."
                 )
+        to_exit = nx.ancestors(self._graph, self.exit.name)
+        to_top = nx.ancestors(self._graph, top.name)
         for node in stations:
-            if not nx.has_path(
-                G=self._graph,
-                source=top.name,
-                target=node.name,
-            ):
+            if node.name not in released:
                 raise ValueError(f"{node.name!r} is unreachable from {top.name!r}.")
-            if nx.has_path(
-                G=self._graph,
-                source=node.name,
-                target=self.exit.name,
-            ):
+            if node.name in to_exit:
                 raise ValueError(
                     f"{node.name!r} routes to the exit, and production jobs "
                     f"return to {top.name!r} instead."
                 )
-            if not nx.has_path(
-                G=self._graph,
-                source=node.name,
-                target=top.name,
-            ):
+            if node.name not in to_top:
                 raise ValueError(f"{node.name!r} needs a route back to {top.name!r}.")
             if node.patience is not None:
                 raise ValueError(
@@ -1313,6 +1321,16 @@ class Model:
                 raise ValueError(
                     f"{node.name!r} rejects outside arrivals, and released "
                     "production jobs cannot be rejected."
+                )
+            if (
+                node.buffer is not None
+                and node.external_overflow is None
+                and self._graph.has_edge(top.name, node.name)
+            ):
+                raise ValueError(
+                    f"Station {node.name!r} has a finite buffer and receives "
+                    f"jobs from {top.name!r}, so it requires "
+                    "external_overflow='wait'."
                 )
         self._check_types(top)
 
@@ -1331,37 +1349,34 @@ class Model:
                     continue
                 reached.add(name)
                 node = self._nodes[name]
-                service_time = node.service_time
-                if isinstance(service_time, Mapping) and kind is None:
-                    raise ValueError(
-                        f"{name!r} sets service times by customer type, and "
-                        f"customers from {source.name!r} have no type."
-                    )
-                if isinstance(service_time, Mapping) and kind not in service_time:
-                    raise ValueError(
-                        f"{name!r} has no service time for type {kind!r}, which "
-                        f"can reach it from {source.name!r}."
-                    )
-                if isinstance(node.patience, Mapping) and kind is None:
-                    raise ValueError(
-                        f"{name!r} sets patience by customer type, and customers "
-                        f"from {source.name!r} have no type."
-                    )
-                if isinstance(node.patience, Mapping) and kind not in node.patience:
-                    raise ValueError(
-                        f"{name!r} has no patience for type {kind!r}, which can "
-                        f"reach it from {source.name!r}."
-                    )
-                if node.priority is not None and kind is None:
-                    raise ValueError(
-                        f"{name!r} ranks customers by type, and customers from "
-                        f"{source.name!r} have no type."
-                    )
-                if node.priority is not None and kind not in node.priority:
-                    raise ValueError(
-                        f"{name!r} has no rank for type {kind!r}, which can "
-                        f"reach it from {source.name!r}."
-                    )
+                for mapping, noun, untyped_phrase in (
+                    (
+                        node.service_time,
+                        "service time",
+                        "sets service times by customer type",
+                    ),
+                    (
+                        node.patience,
+                        "patience",
+                        "sets patience by customer type",
+                    ),
+                    (
+                        node.priority,
+                        "rank",
+                        "ranks customers by type",
+                    ),
+                ):
+                    if isinstance(mapping, Mapping):
+                        if kind is None:
+                            raise ValueError(
+                                f"{name!r} {untyped_phrase}, and customers "
+                                f"from {source.name!r} have no type."
+                            )
+                        if kind not in mapping:
+                            raise ValueError(
+                                f"{name!r} has no {noun} for type {kind!r}, which "
+                                f"can reach it from {source.name!r}."
+                            )
                 rule = _rule(self._routing[name], kind)
                 if rule is None and kind is None:
                     raise ValueError(
@@ -1403,8 +1418,7 @@ class Model:
         >>> figure = model.diagram()
         >>> figure.show()
         """
-        if not isinstance(check, bool):
-            raise ValueError("check must be True or False.")
+        check = boolean(check, "check")
         if check:
             self.validate()
         if self._supply is not None:
@@ -1461,8 +1475,7 @@ class Model:
         start = number(warmup, "Warm-up duration")
         if start >= horizon:
             raise ValueError("Warm-up duration must be shorter than run duration.")
-        if not isinstance(drain, bool):
-            raise ValueError("drain must be True or False.")
+        drain = boolean(drain, "drain")
         if drain and self._supply is not None:
             raise ValueError(
                 "drain serves customers after closing, and a supply chain reviews "
@@ -1577,8 +1590,7 @@ class Model:
         >>> experiment = model.experiment(duration=480, replications=30, seed=1)
         >>> experiment.summary
         """
-        if not isinstance(keep_records, bool):
-            raise ValueError("keep_records must be True or False.")
+        keep_records = boolean(keep_records, "keep_records")
         count = integer(
             value=replications,
             label="Replications",
