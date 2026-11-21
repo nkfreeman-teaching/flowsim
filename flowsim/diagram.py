@@ -327,11 +327,11 @@ def network_diagram(model: Model, problems: dict[str, str]) -> go.Figure:
                 bgcolor="white",
             )
 
-    for kind, color in [
-        ("source", GREEN),
-        ("station", BLUE),
-        ("exit", ORANGE),
-        ("problem", WARNING),
+    for kind, color, symbol, trace_name in [
+        ("source", GREEN, "circle", "Source"),
+        ("station", BLUE, "square", "Station"),
+        ("exit", ORANGE, "diamond", "Exit"),
+        ("problem", WARNING, "hexagon", "Needs route"),
     ]:
         # A node with a problem moves from its kind's trace to the warning trace.
         if kind == "problem":
@@ -342,26 +342,39 @@ def network_diagram(model: Model, problems: dict[str, str]) -> go.Figure:
                 for node in model.nodes.values()
                 if node.kind == kind and node.name not in problems
             ]
+        hovers = [
+            "<br>".join(
+                [node_text(node)]
+                + [
+                    f"{label(field)}: {label(value)}"
+                    for field, value in node._fields()[:4]
+                ]
+            )
+            for node in nodes
+        ]
         figure.add_trace(
             go.Scatter(
                 x=[positions[node.name][0] for node in nodes],
                 y=[positions[node.name][1] for node in nodes],
                 mode="markers+text",
+                name=trace_name,
                 text=[node_text(node) for node in nodes],
+                hovertext=hovers,
                 customdata=[label(problems.get(node.name, "")) for node in nodes],
                 textposition="bottom center",
                 marker={
                     "size": 30,
+                    "symbol": symbol,
                     "color": color,
-                    "line": {"color": "black", "width": 1},
+                    "line": {"color": "black", "width": 2 if kind == "problem" else 1},
                 },
                 hovertemplate=(
-                    "%{text}<br>%{customdata}<extra></extra>"
+                    "%{hovertext}<br>%{customdata}<extra></extra>"
                     if kind == "problem"
-                    else "%{text}<extra></extra>"
+                    else "%{hovertext}<extra></extra>"
                 ),
                 meta=kind,
-                showlegend=False,
+                showlegend=bool(nodes),
             )
         )
     if problems:
@@ -377,11 +390,13 @@ def network_diagram(model: Model, problems: dict[str, str]) -> go.Figure:
         x_label="",
         y_label="",
     )
+    max_rows = max((len(layer) for layer in layers), default=1)
     figure.update_layout(
-        height=400,
+        height=max(400, 180 + 105 * max_rows),
         xaxis={"visible": False, "range": [bounds[0], bounds[1]]},
         yaxis={"visible": False, "range": [bounds[2], bounds[3]]},
-        margin={"l": 50, "r": 50, "t": 50, "b": 80},
+        margin={"l": 50, "r": 50, "t": 65, "b": 80},
+        legend={"orientation": "h", "x": 0, "y": 1.04, "yanchor": "bottom"},
     )
     return figure
 
@@ -570,28 +585,42 @@ def chain_diagram(model: Model) -> go.Figure:
                 bgcolor="white",
             )
     kinds = [
-        ("supplier", GREEN, [SUPPLIER] if SUPPLIER in positions else []),
-        ("stock_point", BLUE, list(stages)),
-        ("demand", ORANGE, [supply.demand.name]),
-        ("station", PURPLE, [name for name in names if positions[name][1] < 0]),
+        (
+            "supplier",
+            GREEN,
+            "triangle-right",
+            "Supplier",
+            [SUPPLIER] if SUPPLIER in positions else [],
+        ),
+        ("stock_point", BLUE, "square", "Stock point", list(stages)),
+        ("demand", ORANGE, "diamond", "Demand", [supply.demand.name]),
+        (
+            "station",
+            PURPLE,
+            "circle",
+            "Station",
+            [name for name in names if positions[name][1] < 0],
+        ),
     ]
-    for kind, color, members in kinds:
+    for kind, color, symbol, trace_name, members in kinds:
         text = [texts[name] for name in members]
         figure.add_trace(
             go.Scatter(
                 x=[positions[name][0] for name in members],
                 y=[positions[name][1] for name in members],
                 mode="markers+text",
+                name=trace_name,
                 text=text,
                 textposition="bottom center",
                 marker={
                     "size": 30,
+                    "symbol": symbol,
                     "color": color,
                     "line": {"color": "black", "width": 1},
                 },
                 hovertemplate="%{text}<extra></extra>",
                 meta=kind,
-                showlegend=False,
+                showlegend=bool(members),
             )
         )
     title = "Goods move left to right."
@@ -611,12 +640,13 @@ def chain_diagram(model: Model) -> go.Figure:
         y_label="",
     )
     figure.update_layout(
-        height=300 + 100 * int(-lowest),
+        height=320 + 100 * int(-lowest),
         xaxis={
             "visible": False,
             "range": [bounds[0], bounds[1]],
         },
         yaxis={"visible": False, "range": [bounds[2], bounds[3]]},
-        margin={"l": 50, "r": 50, "t": 50, "b": 80},
+        margin={"l": 50, "r": 50, "t": 70, "b": 80},
+        legend={"orientation": "h", "x": 0, "y": 1.04, "yanchor": "bottom"},
     )
     return figure

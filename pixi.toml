@@ -14,7 +14,7 @@ typecheck = "pyright flowsim examples"
 check = { depends-on = ["test", "lint", "format-check", "notebook-check", "typecheck"] }
 demo = "python -m examples.run_examples"
 notebook = "marimo edit examples/lesson.py"
-notebook-export = "marimo export html examples/lesson.py -o output/lesson.html"
+notebook-export = "marimo export html -f examples/lesson.py -o output/lesson.html"
 # Fail when Marimo replaced an output with its size warning, which pyproject.toml's
 # output_max_bytes prevents for the lesson viewers.
 lesson-check = { cmd = "python -c \"import pathlib, sys; html = pathlib.Path('output/lesson.html').read_text(encoding='utf-8'); sys.exit('output/lesson.html has a Marimo size warning.' if 'too large for marimo' in html else 0)\"", depends-on = ["notebook-export"] }

@@ -561,8 +561,15 @@ class Fits:
         return "\n".join(lines)
 
     def _repr_html_(self) -> str:
+        numeric = {0, 2, 3, 4}
+
         def cells(row, tag):
-            return "".join(f"<{tag}>{html.escape(c)}</{tag}>" for c in row)
+            return "".join(
+                f'<{tag} style="padding: 4px 10px; '
+                f'text-align: {"right" if idx in numeric else "left"};">'
+                f"{html.escape(c)}</{tag}>"
+                for idx, c in enumerate(row)
+            )
 
         body = "".join(f"<tr>{cells(row, 'td')}</tr>" for row in self._rows())
         failed = "".join(

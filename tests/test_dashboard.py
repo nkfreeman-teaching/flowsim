@@ -281,7 +281,7 @@ def test_the_plotly_bundle_holds_every_trace_type_flowsim_draws():
     named = {
         name for source in sources for name in re.findall(r'"type": "(\w+)"', source)
     } - {"line", "data"}
-    assert named == {"scatter", "histogram"}
+    assert named == {"scatter", "bar", "histogram"}
     drawn = built | named
     assert drawn == {"scatter", "bar", "histogram"}
     bundle = plotly_bundle()

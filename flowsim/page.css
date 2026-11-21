@@ -17,6 +17,7 @@ select, input, button { font: inherit; padding: 8px 11px; border: 1px solid #a9b
 button { cursor: pointer; }
 button:hover { background: #edf3f7; }
 button:disabled { cursor: default; opacity: 0.45; }
+button:focus-visible, select:focus-visible, input:focus-visible, #customers tbody tr:focus-visible { outline: 3px solid #d55e00; outline-offset: 1px; }
 label { font-size: 14px; }
 .chart { width: 100%; min-height: 350px; }
 #utilization { min-height: 0; }
@@ -28,6 +29,7 @@ th { font-weight: 600; color: #455966; white-space: normal; line-height: 1.4; ve
 th:first-child, td:first-child { text-align: left; }
 #customers tbody tr { cursor: pointer; }
 #customers tbody tr:hover { background: #eef5fa; }
+#customers tbody tr.active { background: #dcecf7; }
 #notice { border-left: 4px solid #0072b2; padding-left: 14px; }
 .series { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 4px; }
 .series label, .switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -38,3 +40,4 @@ h3 { margin: 18px 0 6px; font-size: 16px; }
 #run-panel { margin-top: 28px; padding-top: 14px; border-top: 3px solid #0072b2; }
 .run-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } .cards { grid-template-columns: 1fr 1fr; } main { padding: 14px; } }
+@media (max-width: 520px) { .cards { grid-template-columns: 1fr; } }

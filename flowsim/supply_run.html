@@ -8,7 +8,7 @@
   </section>
   <section>
     <h2>Orders up the chain</h2>
-    <p class="muted">Each line is the quantity a stage ordered in each period, beside consumer demand. Wider swings upstream are the bullwhip effect. The dashed line marks the end of warm-up, and the vertical scale fits the measured weeks, so double-click the chart to include startup orders.</p>
+    <p class="muted">Each line is the quantity a stage ordered in each period, beside consumer demand. Wider swings upstream are the bullwhip effect. The dashed line marks the end of warm-up, and the vertical scale fits the measured periods, so double-click the chart to include startup orders.</p>
     <div class="chart" id="orders"></div>
   </section>
   <section>
@@ -67,7 +67,9 @@ function showSupplyRun(root, result, plotTemplate) {
       ["Periods measured", format(first.periods)],
       [first.stock_point + " fill rate", percent(first.fill_rate)],
       [first.stock_point + " bullwhip ratio", format(first.bullwhip_ratio)],
-      [last.stock_point + " bullwhip ratio", format(last.bullwhip_ratio)]
+      stockPoints.length === 1
+        ? [first.stock_point + " mean on hand", format(first.mean_on_hand)]
+        : [last.stock_point + " bullwhip ratio", format(last.bullwhip_ratio)]
     ];
     cards.forEach(([label, value]) => {
       const card = document.createElement("div"); card.className = "card";
@@ -148,7 +150,8 @@ function showSupplyRun(root, result, plotTemplate) {
       for (let index = 0; index < count; index += 1) lines.push(keys.map(key => quote(columns[key][index])).join(","));
       const csv = lines.join("\r\n");
       const url = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
-      const link = document.createElement("a"); link.href = url; link.download = name; link.click();
+      const link = document.createElement("a"); link.href = url; link.download = name;
+      document.body.appendChild(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
     document.getElementById("download-inventory").addEventListener("click", () => download("inventory.csv", result.inventory, result.columns.inventory));

@@ -1195,17 +1195,26 @@ class Model:
     def _display(self) -> tuple[str, list[tuple[str, str]]]:
         counts = {
             kind: sum(node.kind == kind for node in self._nodes.values())
-            for kind in ["source", "station", "exit", "stock_point"]
+            for kind in ["source", "station", "exit", "demand", "stock_point"]
         }
-        parts = [
-            f"{count} {noun}{'' if count == 1 else 's'}"
-            for count, noun in [
+        if (
+            self._supply is not None
+            or counts["stock_point"] > 0
+            or counts["demand"] > 0
+        ):
+            items = [
+                (counts["demand"], "demand"),
+                (counts["stock_point"], "stock point"),
+            ]
+            if counts["station"] > 0:
+                items.append((counts["station"], "station"))
+        else:
+            items = [
                 (counts["source"], "source"),
                 (counts["station"], "station"),
                 (counts["exit"], "exit"),
-                (counts["stock_point"], "stock point"),
             ]
-        ]
+        parts = [f"{count} {noun}{'' if count == 1 else 's'}" for count, noun in items]
         rows = []
         if self.wip_limit is not None:
             rows.append(

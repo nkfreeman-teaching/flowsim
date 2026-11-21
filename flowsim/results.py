@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import polars as pl
 
@@ -31,6 +31,7 @@ from flowsim.display import (
     window_line,
 )
 from flowsim.plots import (
+    gantt_figure,
     inventory_figure,
     orders_figure,
     plot_customer,
@@ -41,6 +42,8 @@ from flowsim.plots import (
     run_page_html,
     utilization_figure,
     wait_figure,
+    warmup_figure,
+    wip_figure,
 )
 from flowsim.records import (
     ACTIVITY_SCHEMA,
@@ -210,7 +213,14 @@ def stack(
     items = list(parts)
     stacked = pl.concat([table for _, table in items])
     labels = [value for value, table in items for _ in range(table.height)]
-    return stacked.with_columns(pl.Series(name=column, values=labels)).select(
+    if labels or not items:
+        series = pl.Series(name=column, values=labels)
+    else:
+        # Preserve the label dtype on empty tables so stacking an empty
+        # experiment alongside a non-empty one (e.g. mixed supply chains) matches.
+        sample = pl.Series(name=column, values=[items[0][0]])
+        series = pl.Series(name=column, values=[], dtype=sample.dtype)
+    return stacked.with_columns(series).select(
         column,
         pl.exclude(column),
     )
@@ -650,18 +660,25 @@ class Results:
 
         return plotly_figure(queue_figure(self, station=station))
 
-    def plot_wait(self, station: str | None = None) -> Figure:
-        """Plot the waiting-time histogram of station arrivals after warm-up.
+    def plot_wait(
+        self,
+        station: str | None = None,
+        *,
+        kind: Literal["histogram", "ecdf"] = "histogram",
+    ) -> Figure:
+        """Plot the waiting-time distribution of station arrivals after warm-up.
 
         Parameters
         ----------
         station : str, optional
             Name of one station. Without it, all stations are drawn.
+        kind : {'histogram', 'ecdf'}, default 'histogram'
+            Whether to draw a histogram or an empirical cumulative distribution.
 
         Returns
         -------
         plotly.graph_objects.Figure
-            The waiting-time histogram.
+            The waiting-time figure.
 
         Example
         -------
@@ -670,15 +687,29 @@ class Results:
         self._require_records("plot_wait()")
         require_stations(self)
 
-        return plotly_figure(wait_figure(self, station=station))
+        return plotly_figure(
+            wait_figure(
+                self,
+                station=station,
+                kind=kind,
+            )
+        )
 
-    def plot_utilization(self, station: str | None = None) -> Figure:
+    def plot_utilization(
+        self,
+        station: str | None = None,
+        *,
+        breakdown: bool = False,
+    ) -> Figure:
         """Plot each station's occupied share of capacity, or one station's.
 
         Parameters
         ----------
         station : str, optional
             Name of one station. Without it, every station is drawn.
+        breakdown : bool, default False
+            When True, draw stacked bars separating processing, blocked,
+            paused, and idle shares of installed capacity.
 
         Returns
         -------
@@ -692,7 +723,69 @@ class Results:
         self._require_records("plot_utilization()")
         require_stations(self)
 
-        return plotly_figure(utilization_figure(self, station=station))
+        return plotly_figure(
+            utilization_figure(
+                self,
+                station=station,
+                breakdown=breakdown,
+            )
+        )
+
+    def plot_gantt(
+        self,
+        *,
+        start: float = 0.0,
+        end: float | None = None,
+        station: str | None = None,
+    ) -> Figure:
+        """Plot a station-by-server Gantt chart of processing, blocked, and paused intervals.
+
+        Parameters
+        ----------
+        start : float, default 0.0
+            Start time of the displayed window.
+        end : float, optional
+            End time of the displayed window. Defaults to the run's end time.
+        station : str, optional
+            Name of one station. Without it, all stations are drawn.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            The server Gantt chart.
+
+        Example
+        -------
+        >>> results.plot_gantt(start=0, end=60).show()
+        """
+        self._require_records("plot_gantt()")
+        require_stations(self)
+
+        return plotly_figure(
+            gantt_figure(
+                self,
+                start=start,
+                end=end,
+                station=station,
+            )
+        )
+
+    def plot_wip(self) -> Figure:
+        """Plot total system work in process over time across all stations.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            The system WIP trajectory figure.
+
+        Example
+        -------
+        >>> results.plot_wip().show()
+        """
+        self._require_records("plot_wip()")
+        require_stations(self)
+
+        return plotly_figure(wip_figure(self))
 
     def plot_resources(
         self,
@@ -1203,6 +1296,55 @@ class Experiment:
                 ),
                 metric=metric,
                 time_unit=self.settings.time_unit,
+            )
+        )
+
+    def plot_warmup(
+        self,
+        metric: Literal["wip", "queue", "on_hand"] = "wip",
+        *,
+        station: str | None = None,
+        stock_point: str | None = None,
+        bin_width: float | None = None,
+        window: int = 1,
+    ) -> Figure:
+        """Plot a Welch ensemble moving-average trajectory to diagnose warm-up.
+
+        Averages time-aligned trajectories across replications so transient
+        startup behavior stands out from single-run noise. Requires runs that
+        kept raw records (``keep_records=True``).
+
+        Parameters
+        ----------
+        metric : {'wip', 'queue', 'on_hand'}, default 'wip'
+            Trajectory to average across replications.
+        station : str, optional
+            Station for ``metric='queue'``. Defaults to the first station.
+        stock_point : str, optional
+            Stock point for ``metric='on_hand'``. Defaults to the first stage.
+        bin_width : float, optional
+            Sampling step for ``'wip'`` or ``'queue'``. Defaults to
+            ``duration / 50``.
+        window : int, default 1
+            Moving-average smoothing window in grid points, at least 1.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            The Welch warm-up diagnostic figure.
+
+        Example
+        -------
+        >>> experiment.plot_warmup(metric="wip", window=5).show()
+        """
+        return plotly_figure(
+            warmup_figure(
+                self,
+                metric=metric,
+                station=station,
+                stock_point=stock_point,
+                bin_width=bin_width,
+                window=window,
             )
         )
 

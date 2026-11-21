@@ -46,9 +46,9 @@ and the table below lists what each object holds.
 
 | Object | Returned by | Tables | Plots | Viewer and export |
 | --- | --- | --- | --- | --- |
-| `Results` | `model.run(...)` | `customers`, `visits`, `states`, `activities`, `failures`, `stations`, and `summary` (plus `inventory`, `shipments`, and `stock_points` for a supply chain), and `report()`, which lists every metric of the run in one long table | `plot_queue()`, `plot_wait()`, `plot_utilization()`, `plot_resources()`, `plot_customer(id)`, `plot_inventory()`, and `plot_orders()` | `viewer()` and `export(folder)` |
-| `Experiment` | `model.experiment(...)` | `summary`, `stations`, and `stock_points` with a `replication` column, `intervals(metric)`, and each run's `Results` in `runs` | `plot(metric)` | `viewer()`, a page of every metric whose runs open on the page, and `export(folder)` |
-| `Comparison` | `flowsim.compare(...)` | `summary`, `stations`, and `stock_points` with `scenario` and `replication` columns, `intervals(metric)`, `differences(metric)`, and each scenario's `Experiment` in `experiments` | `plot(metric)` and `plot(metric, differences=True)` | `viewer()`, a page of every metric and baseline whose runs open on the page, and `export(folder)` |
+| `Results` | `model.run(...)` | `customers`, `visits`, `states`, `activities`, `failures`, `stations`, and `summary` (plus `inventory`, `shipments`, and `stock_points` for a supply chain), `by_type()`, and `report()`, which lists every metric of the run in one long table | `plot_queue()`, `plot_wait()`, `plot_utilization()`, `plot_resources()`, `plot_customer(id)`, `plot_gantt()`, `plot_wip()`, `plot_inventory()`, and `plot_orders()` | `viewer()` and `export(folder)` |
+| `Experiment` | `model.experiment(...)` | `summary`, `stations`, and `stock_points` with a `replication` column, `intervals(metric)`, `table(metrics)`, `estimate(metric)`, and each run's `Results` in `runs` | `plot(metric)` and `plot_warmup()` | `viewer()`, a page of every metric whose runs open on the page, and `export(folder)` |
+| `Comparison` | `flowsim.compare(...)` | `summary`, `stations`, and `stock_points` with `scenario` and `replication` columns, `intervals(metric)`, `differences(metric)`, `table(metrics)`, `estimate(metric)`, and each scenario's `Experiment` in `experiments` | `plot(metric)` and `plot(metric, differences=True)` | `viewer()`, a page of every metric and baseline whose runs open on the page, and `export(folder)` |
 | `Fits` | `flowsim.fit_all(data)` | `table` (one row per fitted family), `failed`, `best`, and `pick(name_or_rank)` | `plot()` | None |
 
 Two catalog functions describe every number in these tables. `flowsim.metrics()`
@@ -216,9 +216,9 @@ A duration argument (`interarrival`, `service_time`, `patience`,
 `per_period` quantity each take a constant, a named distribution, or a function
 of the run's random generator. A constant gives the same value every time (e.g.,
 `service_time=2`). A named distribution states its parameters by name and draws
-a new value each time FlowSim calls it. It prints as it was written (e.g.,
-`Exponential(mean=4)`), reports its `mean`, its `sd`, and a one-sentence
-`describe()`, and appears by name and parameters in export metadata.
+a new value each time FlowSim calls it. It prints as it was written (e.g., `Exponential(mean=4)`), reports its `mean`,
+its `sd`, its `cv`, its `scv`, a one-sentence `describe()`, and `sample(n, seed=42)`,
+and appears by name and parameters in export metadata.
 Interarrival times must be positive, and service times can be zero. Every
 duration uses the model's declared time unit (`"minutes"` by default), and the
 label does not convert units. A demand's `per_period` is instead a quantity of
@@ -241,6 +241,7 @@ units per review period.
 | `discrete(values, weights=None)` | One of a few listed values, with equal chance or by weight |
 | `negative_binomial(mean=, sd=)` | Whole-number counts more variable than Poisson |
 | `shifted(distribution, by=)` | Another distribution's draw plus a fixed amount, e.g., a minimum time |
+| `from_scv(mean=, scv=)` | A non-negative duration matching a target mean and squared coefficient of variation (constant at `scv=0`, gamma otherwise) |
 
 A function of one argument covers what the constructors do not, e.g., demand
 truncated at zero (`lambda rng: max(0.0, rng.normal(100, 20))`, as in
@@ -524,6 +525,13 @@ Wait and flow averages exclude rejections. Outside waiting adds to `total_wait`,
 blocking is reported separately in `total_blocked`, and work in process begins
 at admission. A small mean wait does not establish good service when many
 customers are rejected.
+
+To cap total work in process across the entire service network (CONWIP), pass
+`wip_limit=` and `wip_overflow="wait"` or `"reject"` to `Model(...)`. When the
+network holds `wip_limit` admitted customers, new arrivals either wait in a
+FIFO release queue outside the line (contributing to `outside_wait` and
+`mean_outside_wip`) or are rejected immediately, and leaving or abandoning from
+inside the line releases a token to the next waiting arrival.
 
 #### Priorities and abandonment
 
@@ -927,11 +935,16 @@ results.export("output/my-run")
 ```
 
 `results.report()` lists every replication metric that applies to the run, one
-row per metric and location, with its label, value, and units. The `stations`
-and `summary` tables put their headline columns first. `plot_queue()`,
-`plot_wait()`, and `plot_resources()` without `station=` draw every station with
-a menu that chooses among them, while `plot_utilization()` compares every
-station in one chart.
+row per metric and location, with its label, value, and units, and
+`results.by_type()` breaks down customer counts, wait, and flow times by
+customer type. The `stations` and `summary` tables put their headline columns
+first. `plot_queue()`, `plot_wait()`, and `plot_resources()` without `station=`
+draw every station with a menu that chooses among them (`plot_wait(kind="ecdf")`
+draws an empirical CDF instead of a histogram), while `plot_utilization()`
+compares every station in one chart (`breakdown=True` stacks processing,
+blocked, paused, and idle shares). `plot_gantt()` draws a server-by-server
+activity timeline, and `plot_wip()` plots inside and outside work in process
+over time.
 `results.plot_resources()` draws each station's scheduled, available,
 processing, blocked, paused, and down servers over time. The viewer includes it
 when a model uses staffing schedules, finite buffers, or failures (see Model
@@ -1045,6 +1058,9 @@ experiment.export("output/experiment")
 ```
 
 `intervals` estimates a Student t confidence interval across run-level values.
+`table(metrics)` stacks several metrics into one summary table, `estimate(metric)`
+returns a single metric's estimate dict, and `experiment.plot_warmup()` plots a
+Welch moving-average curve of WIP across replications to help choose `warmup`.
 A station metric gives one row per station unless `station=` names one, and a
 system metric gives one row. Missing run values are excluded and counted in
 `observed_runs`. These intervals describe the finite-run statistic under the

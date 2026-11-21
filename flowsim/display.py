@@ -23,11 +23,19 @@ def display_text(head: str, rows: list[tuple[str, str]]) -> str:
 
 def display_html(head: str, rows: list[tuple[str, str]]) -> str:
     """Render the same heading and rows as a compact HTML table."""
-    body = "".join(
-        '<tr><th style="text-align: left; vertical-align: top; padding-right: 1em;">'
-        f"{html.escape(label)}</th><td><code>{html.escape(value)}</code></td></tr>"
-        for label, value in rows
-    )
+    in_code = False
+    cells = []
+    for label, value in rows:
+        if label:
+            in_code = label == "Next"
+        escaped = html.escape(value)
+        content = f"<code>{escaped}</code>" if in_code else escaped
+        cells.append(
+            '<tr><th style="text-align: left; vertical-align: top; '
+            f'padding: 2px 12px 2px 0;">{html.escape(label)}</th>'
+            f'<td style="padding: 2px 0; vertical-align: top;">{content}</td></tr>'
+        )
+    body = "".join(cells)
     return (
         f"<div><strong>{html.escape(head)}</strong>"
         f'<table style="border-collapse: collapse;">{body}</table></div>'
@@ -39,6 +47,9 @@ def figure(value: object) -> str:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return "n/a"
     if isinstance(value, float):
+        magnitude = abs(value)
+        if magnitude >= 1000 and magnitude < 1e9:
+            return f"{value:,.1f}" if value % 1 else f"{value:,.0f}"
         return f"{value:.3g}"
     return str(value)
 

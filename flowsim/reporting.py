@@ -443,7 +443,7 @@ def metric_axis_label(metric: str, place: str | None, time_unit: str) -> str:
 
 
 def interval_figure(
-    table: pl.DataFrame,
+    table: pl.DataFrame | Sequence[dict[str, Any]],
     metric: str,
     time_unit: str,
     *,
@@ -456,10 +456,14 @@ def interval_figure(
     has its own color. The figure is plain data, as in flowsim.plots.
     """
     column = location_column(metric)
-    rows = table.to_dicts()
+    if isinstance(table, pl.DataFrame):
+        rows = table.to_dicts()
+        scenarios = "scenario" in table.columns
+    else:
+        rows = list(table)
+        scenarios = bool(rows) and "scenario" in rows[0]
     places = list(dict.fromkeys(row[column] for row in rows))
     several = len(places) > 1
-    scenarios = "scenario" in table.columns
 
     def row_label(row: dict) -> str:
         place = "System" if row[column] is None else label(row[column])
@@ -865,10 +869,7 @@ def dashboard(
         helpers={
             "scenario_locations": scenario_locations,
             "location_column": location_column,
-            "scenario_values": scenario_values,
-            "run_values": run_values,
-            "scenario_intervals": scenario_intervals,
-            "paired_differences": paired_differences,
+            "interval_estimate": interval_estimate,
             "interval_figure": interval_figure,
             "replication_figure": replication_figure,
             "window_text": window_text,

@@ -3,6 +3,8 @@
 Editing an example for teaching reasons must not change these models.
 """
 
+import base64
+import gzip
 import json
 
 from flowsim import Comparison, Model, compare, moving_average, order_up_to
@@ -283,8 +285,16 @@ def two_station_queue() -> Model:
 
 def embedded_json(page: str, element: str) -> object:
     """Return the JSON in a page's script element with the given id."""
-    start = page.index(f'<script id="{element}" type="application/json">')
-    return json.loads(page[page.index(">", start) + 1 : page.index("</script>", start)])
+    plain = f'<script id="{element}" type="application/json">'
+    compressed = f'<script id="{element}" type="application/gzip;base64">'
+    if plain in page:
+        start = page.index(plain)
+        return json.loads(
+            page[page.index(">", start) + 1 : page.index("</script>", start)]
+        )
+    start = page.index(compressed)
+    raw = page[page.index(">", start) + 1 : page.index("</script>", start)]
+    return json.loads(gzip.decompress(base64.b64decode(raw)).decode("utf-8"))
 
 
 def table_rows(columns: dict[str, list]) -> list[dict]:

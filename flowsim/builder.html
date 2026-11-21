@@ -108,12 +108,13 @@
     <span class="gap"></span>
     <label for="time-unit">Time unit</label><input id="time-unit">
     <label for="run-duration">Run length</label><input id="run-duration" inputmode="decimal">
+    <label for="run-warmup">Warm-up</label><input id="run-warmup" inputmode="decimal">
     <label for="run-seed">Seed</label><input id="run-seed" inputmode="numeric">
     <label><input type="checkbox" id="run-drain"> Serve every customer after closing</label>
     <span class="gap"></span>
     <button id="save-json" type="button">Save model file</button>
-    <label class="button" for="load-json">Load model file</label>
-    <input type="file" id="load-json" accept=".json,application/json" hidden>
+    <button id="load-json-button" type="button">Load model file</button>
+    <input type="file" id="load-json" accept=".json,application/json" class="sr-only" tabindex="-1">
     <button id="clear-model" type="button">New model</button>
     <span id="file-status" role="status"></span>
   </div>
@@ -192,7 +193,7 @@ let editing = null;
 function emptyState() {
   return {
     time_unit: String(PARAMETERS.model.get("time_unit").default),
-    run: {duration: "480", seed: String(PARAMETERS.run.get("seed").default), drain: false},
+    run: {duration: "480", warmup: "0", seed: String(PARAMETERS.run.get("seed").default), drain: false},
     types: [],
     nodes: [{id: "exit", kind: "exit", name: "Exit", x: 740, y: 230, values: {}}],
     edges: [],
@@ -847,7 +848,7 @@ function renderCanvas() {
     parts.push(`<line class="pending" x1="${origin.x + NODE_W}" y1="${origin.y + NODE_H / 2}" x2="${gesture.point.x}" y2="${gesture.point.y}"></line>`);
   }
   canvas.innerHTML = parts.join("");
-  if (focusKey) {
+  if (focusKey && !gesture) {
     const again = canvas.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
     if (again) again.focus({preventScroll: true});
   }
@@ -882,6 +883,15 @@ function blurCanvas() {
   if (canvas.contains(document.activeElement)) document.activeElement.blur();
 }
 
+let dragFrame = null;
+function scheduleDragRender() {
+  if (dragFrame !== null) return;
+  dragFrame = requestAnimationFrame(() => {
+    dragFrame = null;
+    renderCanvas();
+  });
+}
+
 canvas.addEventListener("pointerdown", (event) => {
   if (event.target.closest("input")) return;
   const point = svgPoint(event);
@@ -891,10 +901,16 @@ canvas.addEventListener("pointerdown", (event) => {
   blurCanvas();
   if (handle && group) {
     gesture = {type: "connect", from: group.dataset.nodeId, point};
+    if (canvas.setPointerCapture && event.pointerId) {
+      try { canvas.setPointerCapture(event.pointerId); } catch {}
+    }
     event.preventDefault();
   } else if (group) {
     const node = nodeById(group.dataset.nodeId);
     gesture = {type: "move", id: node.id, dx: point.x - node.x, dy: point.y - node.y, moved: false};
+    if (canvas.setPointerCapture && event.pointerId) {
+      try { canvas.setPointerCapture(event.pointerId); } catch {}
+    }
     selection = {type: "node", id: node.id};
     renderAll();
     focusCanvasItem(`node:${node.id}`);
@@ -923,20 +939,29 @@ window.addEventListener("pointermove", (event) => {
   } else {
     gesture.point = point;
   }
-  renderCanvas();
+  scheduleDragRender();
 });
 
 window.addEventListener("pointerup", (event) => {
   if (!gesture) return;
   const finished = gesture;
   gesture = null;
+  if (dragFrame !== null) { cancelAnimationFrame(dragFrame); dragFrame = null; }
   if (finished.type === "connect") {
     const target = nodeAt(svgPoint(event));
     if (target) addEdge(finished.from, target.id);
     else renderCanvas();
   } else if (finished.moved) {
+    renderCanvas();
     update();
   }
+});
+
+window.addEventListener("pointercancel", () => {
+  if (!gesture) return;
+  gesture = null;
+  if (dragFrame !== null) { cancelAnimationFrame(dragFrame); dragFrame = null; }
+  renderCanvas();
 });
 
 canvas.addEventListener("input", (event) => {
@@ -1680,8 +1705,19 @@ function checkDuration(spec, parameter, label, problems) {
     checkNumber(spec.value, {kind: "number", minimum, exclusive: parameter.exclusive, required: true}, label, problems);
     return;
   }
+  const before = problems.length;
   for (const item of DISTRIBUTIONS.get(spec.name).parameters) {
     checkNumber(spec[item.name], {...item, required: true}, `${label} ${spec.name} ${item.name}`, problems);
+  }
+  if (problems.length > before) return;
+  if (["uniform", "triangular", "pert", "beta"].includes(spec.name)) {
+    const low = Number(spec.low);
+    const high = Number(spec.high);
+    if (!(low < high)) problems.push(`${label} ${spec.name} requires low < high.`);
+    if ((spec.name === "triangular" || spec.name === "pert") && Number.isFinite(Number(spec.mode))) {
+      const mode = Number(spec.mode);
+      if (mode < low || mode > high) problems.push(`${label} ${spec.name} requires low <= mode <= high.`);
+    }
   }
 }
 
@@ -1692,9 +1728,15 @@ function checkRows(rows, label, value, problems) {
     checkNumber(row.value, {...value, required: true}, `${label} row ${index + 1} ${value.label}`, problems);
   });
   const starts = rows.map((row) => String(row.start).trim());
-  if (starts[0] !== "" && Number(starts[0]) !== 0) problems.push(`${label} must start at time 0.`);
+  if (starts[0] !== "" && Number.isFinite(Number(starts[0])) && Number(starts[0]) !== 0) problems.push(`${label} must start at time 0.`);
   for (let index = 1; index < rows.length; index += 1) {
-    if (starts[index] !== "" && starts[index - 1] !== "" && Number(starts[index]) <= Number(starts[index - 1])) {
+    if (
+      starts[index] !== "" &&
+      starts[index - 1] !== "" &&
+      Number.isFinite(Number(starts[index])) &&
+      Number.isFinite(Number(starts[index - 1])) &&
+      Number(starts[index]) <= Number(starts[index - 1])
+    ) {
       problems.push(`${label} start times must increase from row to row.`);
       break;
     }
@@ -1747,7 +1789,7 @@ function stationProblems(node, found) {
   if (values.staffing_on) {
     checkRows(values.staffing, `${name}: staffing schedule`, {kind: "integer", minimum: 0, label: "servers on duty"}, found);
     const capacity = Number(values.capacity);
-    if (Number.isFinite(capacity) && values.staffing.some((row) => Number(row.value) > capacity)) {
+    if (String(values.capacity).trim() !== "" && Number.isFinite(capacity) && values.staffing.some((row) => Number(row.value) > capacity)) {
       found.push(`${name}: servers on duty cannot exceed capacity ${capacity}.`);
     }
     if (!values.shift_end) found.push(`${name}: choose what an off-duty server does with its current job (shift_end).`);
@@ -1902,12 +1944,13 @@ function routingProblems(found) {
     }
     for (const group of groupsOf(node.id)) {
       if (group.length < 2) continue;
+      const before = found.length;
       let total = 0;
       for (const edge of group) {
         checkNumber(edge.probability, {kind: "number", minimum: 0, exclusive: true, required: true}, `Probability from ${node.name} to ${nodeById(edge.to).name}`, found);
         total += Number(edge.probability);
       }
-      if (Number.isFinite(total) && Math.abs(total - 1) > BRANCH_SUM_TOLERANCE) {
+      if (found.length === before && Number.isFinite(total) && Math.abs(total - 1) > BRANCH_SUM_TOLERANCE) {
         const types = typesText(group[0]);
         found.push(`Branch probabilities from ${node.name}${types ? ` for ${types}` : ""} sum to ${shownSum(total)}, not 1.`);
       }
@@ -1954,6 +1997,14 @@ function problems() {
   const found = [];
   if (!state.time_unit.trim()) found.push("The time unit needs a label, e.g., minutes.");
   checkNumber(state.run.duration, PARAMETERS.run.get("duration"), "Run length", found);
+  const warmupRaw = String(state.run.warmup ?? "0").trim();
+  if (warmupRaw !== "") {
+    const beforeWarmup = found.length;
+    checkNumber(warmupRaw, {kind: "number", minimum: 0, required: false}, "Warm-up", found);
+    if (found.length === beforeWarmup && Number.isFinite(Number(state.run.duration)) && Number(warmupRaw) >= Number(state.run.duration)) {
+      found.push("Warm-up must be shorter than run length.");
+    }
+  }
   checkNumber(state.run.seed, {...PARAMETERS.run.get("seed"), required: true}, "Seed", found);
   const typeNames = new Map();
   for (const item of state.types) {
@@ -2276,12 +2327,20 @@ function generate() {
     ["duration", pyNumber(state.run.duration, "number")],
     ["seed", pyNumber(state.run.seed, "integer")],
   ];
+  const warmupText = String(state.run.warmup ?? "0").trim();
+  if (warmupText !== "" && Number(warmupText) !== 0) {
+    run.push(["warmup", pyNumber(warmupText, "number")]);
+  }
   if (state.run.drain) run.push(["drain", "True"]);
   const imports = ["Model", ...[...used].sort()];
+  const singleImport = `from flowsim import ${imports.join(", ")}`;
+  const importBlock = singleImport.length <= LINE
+    ? singleImport
+    : `from flowsim import (\n${imports.map((item) => `    ${item},`).join("\n")}\n)`;
   return [
     '"""A FlowSim model drawn in the model builder. Edit it like any FlowSim script."""',
     "",
-    `from flowsim import ${imports.join(", ")}`,
+    importBlock,
     "",
     ...body,
     "",
@@ -2323,7 +2382,12 @@ function toJson() {
     version: SCHEMA.format_version,
     flowsim_version: SCHEMA.flowsim_version,
     time_unit: state.time_unit,
-    run: {duration: jsonNumber(state.run.duration), seed: jsonNumber(state.run.seed), drain: state.run.drain},
+    run: {
+      duration: jsonNumber(state.run.duration),
+      ...(String(state.run.warmup ?? "0").trim() !== "" && Number(state.run.warmup) !== 0 ? {warmup: jsonNumber(state.run.warmup)} : {}),
+      seed: jsonNumber(state.run.seed),
+      drain: state.run.drain,
+    },
     types: state.types.map((item) => ({id: item.id, name: item.name})),
     nodes: state.nodes.map((node) => {
       const entry = {id: node.id, kind: node.kind, name: node.name, x: node.x, y: node.y};
@@ -2388,9 +2452,18 @@ function fromJson(data) {
   if (data.version !== SCHEMA.format_version && data.version !== 1) {
     throw new Error(`This file has model format version ${data.version}, and this page reads versions 1 to ${SCHEMA.format_version}.`);
   }
+  if (!data.run || typeof data.run !== "object") throw new Error("The file is missing run settings.");
+  if (!Array.isArray(data.nodes)) throw new Error("The file is missing its nodes list.");
+  if (!Array.isArray(data.edges)) throw new Error("The file is missing its routes list.");
+  if (data.version !== 1 && !Array.isArray(data.types)) throw new Error("The file is missing its customer types list.");
   const loaded = emptyState();
   loaded.time_unit = text(data.time_unit);
-  loaded.run = {duration: text(data.run.duration), seed: text(data.run.seed), drain: data.run.drain === true};
+  loaded.run = {
+    duration: text(data.run.duration),
+    warmup: data.run.warmup === undefined || data.run.warmup === null ? "0" : text(data.run.warmup),
+    seed: text(data.run.seed),
+    drain: data.run.drain === true,
+  };
   const types = new Set();
   let nextType = 1;
   for (const item of data.version === 1 ? [] : data.types) {
@@ -2414,7 +2487,9 @@ function fromJson(data) {
     }
     if (ids.has(entry.id)) throw new Error(`Two nodes have the id "${entry.id}".`);
     ids.add(entry.id);
-    const node = {id: String(entry.id), kind: entry.kind, name: text(entry.name), x: Number(entry.x) || 0, y: Number(entry.y) || 0, values: {}};
+    const x = Math.min(Math.max(Number(entry.x) || 0, 0), MAX_X - NODE_W);
+    const y = Math.min(Math.max(Number(entry.y) || 0, 0), MAX_Y - NODE_H);
+    const node = {id: String(entry.id), kind: entry.kind, name: text(entry.name), x, y, values: {}};
     if (node.kind === "exit") {
       node.name = "Exit";
     } else {
@@ -2490,12 +2565,19 @@ document.getElementById("load-json").addEventListener("change", async (event) =>
   event.target.value = "";
 });
 
+document.getElementById("load-json-button").addEventListener("click", () => {
+  document.getElementById("load-json").click();
+});
+
 document.getElementById("clear-model").addEventListener("click", () => {
   record(null);
   state = emptyState();
   selection = null;
+  document.getElementById("canvas-status").textContent = "";
+  document.getElementById("file-status").textContent = "Started a new model. Use Undo to restore.";
   syncSettings();
   renderAll();
+  announce("Started a new model. Press Undo to restore.");
 });
 
 document.getElementById("download-code").addEventListener("click", () => {
@@ -2525,6 +2607,7 @@ document.getElementById("copy-code").addEventListener("click", async () => {
 function syncSettings() {
   document.getElementById("time-unit").value = state.time_unit;
   document.getElementById("run-duration").value = state.run.duration;
+  document.getElementById("run-warmup").value = state.run.warmup ?? "0";
   document.getElementById("run-seed").value = state.run.seed;
   document.getElementById("run-drain").checked = state.run.drain;
 }
@@ -2537,6 +2620,11 @@ document.getElementById("time-unit").addEventListener("input", (event) => {
 document.getElementById("run-duration").addEventListener("input", (event) => {
   record("run-duration");
   state.run.duration = event.target.value;
+  update();
+});
+document.getElementById("run-warmup").addEventListener("input", (event) => {
+  record("run-warmup");
+  state.run.warmup = event.target.value;
   update();
 });
 document.getElementById("run-seed").addEventListener("input", (event) => {

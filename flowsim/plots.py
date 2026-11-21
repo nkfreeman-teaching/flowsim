@@ -19,7 +19,7 @@ import math
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import plotly.graph_objects as go
@@ -27,10 +27,10 @@ import polars as pl
 
 from flowsim.catalog import METRICS, unknown
 from flowsim.records import Phase, Status
-from flowsim.validation import integer
+from flowsim.validation import boolean, integer, number
 
 if TYPE_CHECKING:
-    from flowsim.results import Results
+    from flowsim.results import Experiment, Results
 
 BLUE = "#0072B2"
 ORANGE = "#D55E00"
@@ -92,10 +92,12 @@ def typed_array(values: np.ndarray) -> dict | list:
     if values.size == 0:
         return []
     if values.dtype == np.int64:
+        lo = int(values.min())
+        hi = int(values.max())
         smaller = [
             kind
             for kind in [np.int8, np.int16, np.int32]
-            if np.iinfo(kind).min <= values.min() and values.max() <= np.iinfo(kind).max
+            if np.iinfo(kind).min <= lo and hi <= np.iinfo(kind).max
         ]
         if not smaller:
             return values.tolist()
@@ -135,8 +137,8 @@ def base_layout(x_label: str, y_label: str) -> dict:
         "font": {"family": "Georgia, serif", "size": 14},
         "xaxis": {"title": {"text": label(x_label)}, "rangemode": "tozero"},
         "yaxis": {"title": {"text": label(y_label)}, "rangemode": "tozero"},
-        "margin": {"l": 85, "r": 30, "t": 35, "b": 70},
-        "legend": {"orientation": "h", "y": 1.14, "x": 0},
+        "margin": {"l": 85, "r": 30, "t": 60, "b": 70},
+        "legend": {"orientation": "h", "y": 1.04, "x": 0, "yanchor": "bottom"},
         "hovermode": "closest",
     }
 
@@ -186,8 +188,14 @@ def style(figure: go.Figure, x_label: str, y_label: str) -> go.Figure:
     return figure
 
 
-def dashed_line(figure: dict, x: float) -> None:
-    """Add a dashed gray vertical line at x, as Plotly's add_vline draws it."""
+def dashed_line(
+    figure: dict,
+    x: float,
+    *,
+    text: str | None = None,
+    dash: str = "dash",
+) -> None:
+    """Add a vertical reference line at x, optionally labeled above the plot."""
     figure["layout"].setdefault("shapes", []).append(
         {
             "type": "line",
@@ -197,14 +205,32 @@ def dashed_line(figure: dict, x: float) -> None:
             "y0": 0,
             "y1": 1,
             "yref": "y domain",
-            "line": {"color": GRAY, "dash": "dash"},
+            "line": {"color": GRAY, "dash": dash},
         }
     )
+    if text:
+        figure["layout"].setdefault("annotations", []).append(
+            {
+                "x": x,
+                "y": 1,
+                "xref": "x",
+                "yref": "y domain",
+                "text": label(text),
+                "showarrow": False,
+                "yanchor": "bottom",
+                "font": {"size": 11, "color": GRAY},
+            }
+        )
 
 
 def warmup_line(figure: dict, result: Results) -> None:
     if result.settings.warmup > 0:
-        dashed_line(figure, result.settings.warmup)
+        dashed_line(
+            figure,
+            result.settings.warmup,
+            text="Warm-up",
+            dash="dot",
+        )
 
 
 def station_menu(figure: dict, stations: list[str]) -> None:
@@ -301,8 +327,24 @@ def queue_figure(result: Results, station: str | None = None) -> dict:
             y_label="Customers",
         ),
     }
+    by_station = (
+        {
+            key[0]: frame
+            for key, frame in result.states.partition_by(
+                "station",
+                as_dict=True,
+                maintain_order=True,
+            ).items()
+        }
+        if len(names) > 1
+        else {}
+    )
     for index, place in enumerate(names):
-        history = result.states.filter(pl.col("station") == place)
+        history = (
+            by_station.get(place, result.states.clear())
+            if len(names) > 1
+            else result.states.filter(pl.col("station") == place)
+        )
         for field, color, name in [
             ("waiting", BLUE, "Waiting"),
             ("busy", ORANGE, "Occupied servers"),
@@ -327,40 +369,110 @@ def queue_figure(result: Results, station: str | None = None) -> dict:
     )
     figure["layout"]["xaxis"]["rangeslider"] = {"visible": True, "thickness": 0.1}
     if result.settings.drain:
-        dashed_line(figure, result.settings.duration)
+        dashed_line(
+            figure,
+            result.settings.duration,
+            text="Closing",
+            dash="dash",
+        )
     warmup_line(figure, result)
     return figure
 
 
-def wait_figure(result: Results, station: str | None = None) -> dict:
+def wait_figure(
+    result: Results,
+    station: str | None = None,
+    *,
+    kind: Literal["histogram", "ecdf"] = "histogram",
+) -> dict:
     """Return each station's observed waits for station arrivals after warm-up."""
+    if kind not in {"histogram", "ecdf"}:
+        raise ValueError(f"kind must be 'histogram' or 'ecdf', not {kind!r}.")
     names = chosen_stations(result, station)
+    unit = label(result.settings.time_unit)
     figure = {
         "data": [],
         "layout": base_layout(
             x_label=f"Waiting time ({result.settings.time_unit})",
-            y_label="Customers",
+            y_label="Cumulative share" if kind == "ecdf" else "Customers",
         ),
     }
+    observed = result.visits.filter(
+        (pl.col("arrival_time") >= result.settings.warmup)
+        & pl.col("wait_time").is_not_null()
+    )
+    by_station = (
+        {
+            key[0]: frame
+            for key, frame in observed.partition_by(
+                "station",
+                as_dict=True,
+                maintain_order=True,
+            ).items()
+        }
+        if len(names) > 1
+        else {}
+    )
     for index, place in enumerate(names):
-        waits = trace_values(
-            result.visits.filter(
-                (pl.col("station") == place)
-                & (pl.col("arrival_time") >= result.settings.warmup)
-                & pl.col("wait_time").is_not_null()
-            ).get_column("wait_time")
-        )
-        figure["data"].append(
+        series = (
+            by_station.get(place, observed.clear())
+            if len(names) > 1
+            else observed.filter(pl.col("station") == place)
+        ).get_column("wait_time")
+        if kind == "ecdf":
+            sorted_vals = np.sort(series.to_numpy())
+            if sorted_vals.size > 0:
+                xs = np.concatenate([[0.0], sorted_vals]).tolist()
+                ys = (np.arange(sorted_vals.size + 1) / sorted_vals.size).tolist()
+            else:
+                xs, ys = [], []
+            figure["data"].append(
+                {
+                    "type": "scatter",
+                    "x": xs,
+                    "y": ys,
+                    "name": label(place),
+                    "mode": "lines",
+                    "line": {"shape": "hv", "color": BLUE, "width": 2},
+                    "visible": index == 0,
+                    "meta": place,
+                    "hovertemplate": f"Wait ≤ %{{x:.2f}} {unit}<br>"
+                    "Share: %{y:.1%}<extra></extra>",
+                }
+            )
+        else:
+            waits = trace_values(series)
+            figure["data"].append(
+                {
+                    "type": "histogram",
+                    "x": waits,
+                    "xbins": {"start": 0},
+                    "name": label(place),
+                    "visible": index == 0,
+                    "meta": place,
+                    "marker": {
+                        "color": BLUE,
+                        "line": {"color": "black", "width": 1},
+                    },
+                    "hovertemplate": f"Wait bin: %{{x}} {unit}<br>"
+                    "Customers: %{y}<extra></extra>",
+                }
+            )
+    if len(names) == 1 and observed.filter(pl.col("station") == names[0]).is_empty():
+        figure["layout"].setdefault("annotations", []).append(
             {
-                "type": "histogram",
-                "x": waits,
-                "name": label(place),
-                "visible": index == 0,
-                "meta": place,
-                "marker": {"color": BLUE, "line": {"color": "black", "width": 1}},
-                "hovertemplate": "Wait bin: %{x}<br>Customers: %{y}<extra></extra>",
+                "x": 0.5,
+                "y": 0.5,
+                "xref": "paper",
+                "yref": "paper",
+                "text": "No observed waits after warm-up",
+                "showarrow": False,
+                "font": {"size": 14, "color": GRAY},
             }
         )
+    if kind == "ecdf":
+        figure["layout"]["yaxis"]["range"] = [0, 1.02]
+        figure["layout"]["yaxis"]["tickformat"] = ".0%"
     station_menu(
         figure=figure,
         stations=names if station is None else [],
@@ -369,20 +481,50 @@ def wait_figure(result: Results, station: str | None = None) -> dict:
     return figure
 
 
-def utilization_figure(result: Results, station: str | None = None) -> dict:
+def utilization_figure(
+    result: Results,
+    station: str | None = None,
+    *,
+    breakdown: bool = False,
+) -> dict:
     """Return each station's occupied share of installed capacity, or one station's."""
+    breakdown = boolean(breakdown, "breakdown")
     names = chosen_stations(result, station)
     stations = result.stations.filter(pl.col("station").is_in(names))
     layout = base_layout(
-        x_label="Occupied server capacity",
+        x_label="Share of installed capacity"
+        if breakdown
+        else "Occupied server capacity",
         y_label="Station",
     )
     layout["xaxis"].update(range=[0, 1.05], tickformat=".0%")
+    layout["yaxis"].update(autorange="reversed", automargin=True)
     layout["height"] = max(220, 150 + 40 * len(names))
+    station_labels = [label(name) for name in stations.get_column("station")]
+    if breakdown:
+        layout["barmode"] = "stack"
+        data = [
+            {
+                "type": "bar",
+                "orientation": "h",
+                "x": trace_values(stations.get_column(column)),
+                "y": station_labels,
+                "name": name,
+                "marker": {"color": color, "line": {"color": "black", "width": 0.5}},
+                "hovertemplate": f"%{{y}}<br>{name}: %{{x:.1%}}<extra></extra>",
+            }
+            for column, color, name in [
+                ("processing_utilization", ORANGE, "Processing"),
+                ("blocking_fraction", GREEN, "Blocked"),
+                ("paused_fraction", PURPLE, "Paused"),
+                ("idle_fraction", "#BFC9D1", "Idle"),
+            ]
+        ]
+        return {"data": data, "layout": layout}
     trace = {
         "type": "scatter",
         "x": trace_values(stations.get_column("utilization")),
-        "y": [label(name) for name in stations.get_column("station")],
+        "y": station_labels,
         "mode": "markers",
         "marker": {"size": 12, "color": BLUE, "line": {"color": "black", "width": 1}},
         "hovertemplate": "%{y}<br>Occupied capacity: %{x:.1%}<extra></extra>",
@@ -576,7 +718,12 @@ def resources_figure(
         margin={"l": 85, "r": 175, "t": 60, "b": 70},
     )
     if result.settings.drain:
-        dashed_line(figure, result.settings.duration)
+        dashed_line(
+            figure,
+            result.settings.duration,
+            text="Closing",
+            dash="dash",
+        )
     warmup_line(figure, result)
     return figure
 
@@ -597,20 +744,35 @@ def timeline_spans(result: Results) -> pl.DataFrame:
         pl.col("arrival_time").alias("start"),
         pl.coalesce("service_start", "abandon_time").alias("end"),
     )
-    activities = [
-        result.activities.filter(pl.col("state") == state).select(
-            "customer_id",
-            pl.lit(activity).alias("activity"),
-            "station",
-            "start",
-            "end",
-        )
-        for activity, state in [
-            ("In service", Phase.PROCESSING),
-            ("Paused", Phase.PAUSED),
-            ("Blocked", Phase.BLOCKED),
+    if not result._resources_vary:
+        parts = [
+            waiting,
+            result.activities.select(
+                "customer_id",
+                pl.lit("In service").alias("activity"),
+                "station",
+                "start",
+                "end",
+            ),
         ]
-    ]
+    else:
+        parts = [
+            waiting,
+            *[
+                result.activities.filter(pl.col("state") == state).select(
+                    "customer_id",
+                    pl.lit(activity).alias("activity"),
+                    "station",
+                    "start",
+                    "end",
+                )
+                for activity, state in [
+                    ("In service", Phase.PROCESSING),
+                    ("Paused", Phase.PAUSED),
+                    ("Blocked", Phase.BLOCKED),
+                ]
+            ],
+        ]
     outside = result.customers.filter(
         (pl.col("status") == Status.OUTSIDE)
         | (pl.col("outside_wait").is_not_null() & (pl.col("outside_wait") != 0))
@@ -626,7 +788,9 @@ def timeline_spans(result: Results) -> pl.DataFrame:
         pl.col("arrival_time").alias("start"),
         pl.coalesce("admission_time", "abandon_time").alias("end"),
     )
-    return pl.concat([waiting, *activities, outside]).with_columns(
+    if not outside.is_empty():
+        parts.append(outside)
+    return pl.concat(parts).with_columns(
         pl.col("end").fill_null(result.settings.end_time),
     )
 
@@ -639,18 +803,24 @@ def plot_customer(result: Results, customer_id: int) -> go.Figure:
     figure = go.Figure()
     for activity, color in TIMELINE_COLORS.items():
         bars = spans.filter(pl.col("activity") == activity)
+        starts = bars.get_column("start").to_list()
+        ends = bars.get_column("end").to_list()
         figure.add_trace(
             go.Bar(
-                base=bars.get_column("start").to_list(),
-                x=(bars.get_column("end") - bars.get_column("start")).to_list(),
+                base=starts,
+                x=[end - start for start, end in zip(starts, ends)],
                 y=[label(station) for station in bars.get_column("station")],
+                customdata=list(zip(starts, ends)),
                 orientation="h",
                 name=activity,
                 marker={
                     "color": color,
                     "line": {"color": "black", "width": 1},
                 },
-                hovertemplate="%{y}<br>Duration: %{x:.2f}<extra>%{fullData.name}</extra>",
+                hovertemplate=(
+                    "%{y}<br>%{customdata[0]:.2f}–%{customdata[1]:.2f} "
+                    "(duration %{x:.2f})<extra>%{fullData.name}</extra>"
+                ),
             )
         )
     style(
@@ -660,6 +830,325 @@ def plot_customer(result: Results, customer_id: int) -> go.Figure:
     )
     figure.update_layout(barmode="overlay")
     figure.update_yaxes(autorange="reversed")
+    return figure
+
+
+def gantt_figure(
+    result: Results,
+    *,
+    start: float = 0.0,
+    end: float | None = None,
+    station: str | None = None,
+) -> dict:
+    """Return a station-by-server Gantt chart of processing, blocked, and paused bars."""
+    start_time = number(start, "Start time")
+    end_limit = result.settings.end_time
+    assert end_limit is not None
+    stop_time = (
+        end_limit
+        if end is None
+        else number(
+            value=end,
+            label="End time",
+            positive=True,
+        )
+    )
+    if stop_time <= start_time:
+        raise ValueError("End time must be greater than start time.")
+    names = chosen_stations(result, station)
+    capacities = result.settings.capacities
+    assert capacities is not None
+    lanes = [
+        f"{place} #{server_id}" if capacities[place] > 1 else place
+        for place in names
+        for server_id in range(1, capacities[place] + 1)
+    ]
+    rows = (
+        result.activities.filter(pl.col("station").is_in(names))
+        .with_columns(pl.col("end").fill_null(end_limit))
+        .filter((pl.col("end") > start_time) & (pl.col("start") < stop_time))
+        .with_columns(
+            pl.col("start").clip(lower_bound=start_time).alias("clip_start"),
+            pl.col("end").clip(upper_bound=stop_time).alias("clip_end"),
+        )
+    )
+    unit = label(result.settings.time_unit)
+    data = []
+    for state_name, activity_label in [
+        (Phase.PROCESSING, "In service"),
+        (Phase.BLOCKED, "Blocked"),
+        (Phase.PAUSED, "Paused"),
+    ]:
+        subset = rows.filter(pl.col("state") == state_name)
+        if subset.is_empty():
+            continue
+        stations_col = subset.get_column("station").to_list()
+        servers_col = subset.get_column("server_id").to_list()
+        starts = subset.get_column("clip_start").to_list()
+        ends = subset.get_column("clip_end").to_list()
+        cids = subset.get_column("customer_id").to_list()
+        y_vals = [
+            label(f"{st} #{sid}" if capacities[st] > 1 else st)
+            for st, sid in zip(stations_col, servers_col)
+        ]
+        data.append(
+            {
+                "type": "bar",
+                "orientation": "h",
+                "name": activity_label,
+                "base": starts,
+                "x": [e - s for s, e in zip(starts, ends)],
+                "y": y_vals,
+                "customdata": list(zip(cids, starts, ends)),
+                "marker": {
+                    "color": TIMELINE_COLORS[activity_label],
+                    "line": {"color": "black", "width": 0.6},
+                },
+                "hovertemplate": (
+                    f"%{{y}}<br>Customer %{{customdata[0]}}<br>"
+                    f"%{{customdata[1]:.2f}}–%{{customdata[2]:.2f}} {unit} "
+                    "(duration %{x:.2f})<extra>%{fullData.name}</extra>"
+                ),
+            }
+        )
+    layout = base_layout(
+        x_label=f"Simulation time ({result.settings.time_unit})",
+        y_label="Server",
+    )
+    layout["barmode"] = "overlay"
+    layout["height"] = max(260, 150 + 42 * len(lanes))
+    layout["xaxis"]["range"] = [start_time, stop_time]
+    layout["yaxis"].update(
+        categoryorder="array",
+        categoryarray=[label(lane) for lane in lanes],
+        autorange="reversed",
+        automargin=True,
+    )
+    return {"data": data, "layout": layout}
+
+
+def wip_figure(result: Results) -> dict:
+    """Return total system WIP (inside and, if nonzero, outside) over time."""
+    require_stations(result)
+    # Collect every unique state-change time across stations and forward-fill each
+    # station's waiting + busy and outside counts onto that common time axis.
+    times_df = result.states.select("time").unique().sort("time")
+    times = times_df.get_column("time").to_numpy()
+    inside_total = np.zeros(times.size, dtype=float)
+    outside_total = np.zeros(times.size, dtype=float)
+    for _, frame in result.states.partition_by(
+        "station",
+        as_dict=True,
+        maintain_order=True,
+    ).items():
+        st_times = frame.get_column("time").to_numpy()
+        idx = np.clip(
+            np.searchsorted(st_times, times, side="right") - 1, 0, st_times.size - 1
+        )
+        inside_total += (
+            frame.get_column("waiting").to_numpy()[idx]
+            + frame.get_column("busy").to_numpy()[idx]
+        )
+        outside_total += frame.get_column("outside").to_numpy()[idx]
+    unit = label(result.settings.time_unit)
+    figure: dict = {
+        "data": [
+            {
+                "type": "scatter",
+                "x": times.tolist(),
+                "y": inside_total.tolist(),
+                "name": "In system (WIP)",
+                "mode": "lines",
+                "line": {"shape": "hv", "color": BLUE, "width": 2},
+                "hovertemplate": f"%{{x:.2f}} {unit}<br>%{{y:.0f}} customers<extra>In system</extra>",
+            }
+        ],
+        "layout": base_layout(
+            x_label=f"Simulation time ({result.settings.time_unit})",
+            y_label="Customers",
+        ),
+    }
+    if np.any(outside_total > 0):
+        figure["data"].append(
+            {
+                "type": "scatter",
+                "x": times.tolist(),
+                "y": outside_total.tolist(),
+                "name": "Waiting outside",
+                "mode": "lines",
+                "line": {"shape": "hv", "color": ORANGE, "width": 2, "dash": "dash"},
+                "hovertemplate": f"%{{x:.2f}} {unit}<br>%{{y:.0f}} customers<extra>Outside</extra>",
+            }
+        )
+    if result.settings.drain:
+        dashed_line(
+            figure,
+            result.settings.duration,
+            text="Closing",
+            dash="dash",
+        )
+    warmup_line(figure, result)
+    return figure
+
+
+def warmup_figure(
+    experiment: Experiment,
+    *,
+    metric: Literal["wip", "queue", "on_hand"] = "wip",
+    station: str | None = None,
+    stock_point: str | None = None,
+    bin_width: float | None = None,
+    window: int = 1,
+) -> dict:
+    """Build a Welch ensemble moving-average plot to diagnose warm-up duration."""
+    if not all(run.records_kept for run in experiment.runs):
+        raise ValueError(
+            "experiment.plot_warmup() reads raw records. Rerun with keep_records=True."
+        )
+    if metric not in {"wip", "queue", "on_hand"}:
+        raise ValueError(
+            f"metric must be 'wip', 'queue', or 'on_hand', not {metric!r}."
+        )
+    smooth = integer(
+        value=window,
+        label="Moving-average window",
+        minimum=1,
+    )
+    first = experiment.runs[0]
+    duration = experiment.settings.duration
+    unit = experiment.settings.time_unit
+    if metric == "on_hand":
+        names = experiment.stock_point_names
+        if not names:
+            raise ValueError("metric='on_hand' requires a supply chain model.")
+        chosen = names[0] if stock_point is None else stock_point
+        if chosen not in names:
+            raise unknown(
+                kind="stock point",
+                name=chosen,
+                choices=names,
+                intro=f"Stock point {chosen!r} is not in this experiment.",
+            )
+        series_list = []
+        times_ref: np.ndarray | None = None
+        for run in experiment.runs:
+            sub = run.inventory.filter(pl.col("stock_point") == chosen).sort("period")
+            if times_ref is None:
+                times_ref = sub.get_column("time").to_numpy()
+            series_list.append(sub.get_column("on_hand").to_numpy())
+        assert times_ref is not None
+        grid = times_ref
+        ensemble = np.mean(np.vstack(series_list), axis=0)
+        y_label = f"Mean on-hand stock at {chosen}"
+    else:
+        require_stations(first)
+        capacities = first.settings.capacities
+        assert capacities is not None
+        station_names = list(capacities)
+        chosen_station: str | None = None
+        if metric == "queue":
+            chosen_station = station_names[0] if station is None else station
+            if chosen_station not in capacities:
+                raise unknown(
+                    kind="station",
+                    name=chosen_station,
+                    choices=station_names,
+                    intro=f"Station {chosen_station!r} is not in this experiment.",
+                )
+        step = (
+            duration / 50.0
+            if bin_width is None
+            else number(
+                value=bin_width,
+                label="Bin width",
+                positive=True,
+            )
+        )
+        grid = np.arange(0.0, duration, step)
+        if grid.size == 0:
+            grid = np.array([0.0])
+        acc = np.zeros(grid.size, dtype=float)
+        for run in experiment.runs:
+            if metric == "queue":
+                sub = run.states.filter(pl.col("station") == chosen_station)
+                st_times = sub.get_column("time").to_numpy()
+                idx = np.clip(
+                    np.searchsorted(st_times, grid, side="right") - 1,
+                    0,
+                    st_times.size - 1,
+                )
+                acc += sub.get_column("waiting").to_numpy()[idx]
+            else:
+                for _, frame in run.states.partition_by(
+                    "station",
+                    as_dict=True,
+                    maintain_order=True,
+                ).items():
+                    st_times = frame.get_column("time").to_numpy()
+                    idx = np.clip(
+                        np.searchsorted(st_times, grid, side="right") - 1,
+                        0,
+                        st_times.size - 1,
+                    )
+                    acc += (
+                        frame.get_column("waiting").to_numpy()[idx]
+                        + frame.get_column("busy").to_numpy()[idx]
+                    )
+        ensemble = acc / len(experiment.runs)
+        y_label = (
+            f"Ensemble mean queue at {chosen_station}"
+            if metric == "queue"
+            else "Ensemble mean WIP (customers)"
+        )
+    data = []
+    if smooth > 1 and ensemble.size > 1:
+        kernel = np.ones(min(smooth, ensemble.size)) / min(smooth, ensemble.size)
+        smoothed = np.convolve(ensemble, kernel, mode="same")
+        data.append(
+            {
+                "type": "scatter",
+                "x": grid.tolist(),
+                "y": ensemble.tolist(),
+                "name": f"Ensemble mean ({len(experiment.runs)} runs)",
+                "mode": "lines",
+                "line": {"color": "#BFC9D1", "width": 1.5},
+            }
+        )
+        data.append(
+            {
+                "type": "scatter",
+                "x": grid.tolist(),
+                "y": smoothed.tolist(),
+                "name": f"Welch moving average (window={smooth})",
+                "mode": "lines",
+                "line": {"color": BLUE, "width": 2.5},
+            }
+        )
+    else:
+        data.append(
+            {
+                "type": "scatter",
+                "x": grid.tolist(),
+                "y": ensemble.tolist(),
+                "name": f"Ensemble mean ({len(experiment.runs)} runs)",
+                "mode": "lines",
+                "line": {"color": BLUE, "width": 2},
+            }
+        )
+    figure: dict = {
+        "data": data,
+        "layout": base_layout(
+            x_label=f"Simulation time ({unit})",
+            y_label=y_label,
+        ),
+    }
+    if experiment.settings.warmup > 0:
+        dashed_line(
+            figure,
+            experiment.settings.warmup,
+            text="Warm-up",
+            dash="dot",
+        )
     return figure
 
 
@@ -761,7 +1250,7 @@ def orders_figure(result: Results) -> dict:
                 pl.col("demand").max(),
             )
         ).item()
-        figure["layout"]["yaxis"]["range"] = [0, 1.05 * top]
+        figure["layout"]["yaxis"]["range"] = [0, max(1.0, 1.05 * top)]
     return figure
 
 
@@ -874,11 +1363,20 @@ def page_template() -> dict:
 
 
 def page_json(payload: object) -> str:
-    """Return JSON that is safe inside a page's script element.
+    """Return compact JSON that is safe inside a page's script element.
 
     Escaping '<' keeps model labels from ending the script element.
     """
-    return json.dumps(payload, allow_nan=False).replace("<", "\\u003c")
+    return json.dumps(
+        payload,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).replace("<", "\\u003c")
+
+
+@functools.cache
+def _read_template(name: str) -> str:
+    return Path(__file__).with_name(name).read_text(encoding="utf-8")
 
 
 def fill_template(name: str, values: dict[str, str]) -> str:
@@ -887,7 +1385,7 @@ def fill_template(name: str, values: dict[str, str]) -> str:
     One pass means a placeholder-like name inside a value (e.g., in a
     scenario name or in Plotly's code) is never replaced.
     """
-    template = Path(__file__).with_name(name).read_text(encoding="utf-8")
+    template = _read_template(name)
     return re.sub(
         pattern=r"__([A-Z_]+)__",
         repl=lambda match: values[match.group(1)],
@@ -904,8 +1402,8 @@ def fill_template(name: str, values: dict[str, str]) -> str:
 PLOTLY_BUNDLE = "plotly-cartesian.min.js"
 
 
-def page_parts() -> dict[str, str]:
-    """Return the style, Plotly, template, and run views that every page holds."""
+@functools.cache
+def _static_page_parts() -> dict[str, str]:
     folder = Path(__file__).parent
     return {
         "STYLE": (folder / "page.css").read_text(encoding="utf-8"),
@@ -914,6 +1412,11 @@ def page_parts() -> dict[str, str]:
         "SERVICE_RUN": (folder / "service_run.html").read_text(encoding="utf-8"),
         "SUPPLY_RUN": (folder / "supply_run.html").read_text(encoding="utf-8"),
     }
+
+
+def page_parts() -> dict[str, str]:
+    """Return the style, Plotly, template, and run views that every page holds."""
+    return dict(_static_page_parts())
 
 
 def run_page_html(result: Results) -> str:

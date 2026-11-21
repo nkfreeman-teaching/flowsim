@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import html
 import webbrowser
 from pathlib import Path
 
@@ -107,10 +106,16 @@ class Viewer:
         return path
 
     def _repr_html_(self) -> str:
-        # srcdoc holds the escaped document, and the sandbox without
-        # allow-same-origin gives the page its own origin.
+        # Single-quoted srcdoc avoids expanding every JSON '"' into 6-byte &quot;,
+        # saving ~2 MB on large comparison dashboards while keeping tags escaped.
+        escaped = (
+            self._document.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("'", "&#x27;")
+        )
         return (
-            f'<iframe srcdoc="{html.escape(self._document, quote=True)}" '
+            f"<iframe srcdoc='{escaped}' "
             'sandbox="allow-scripts allow-downloads" '
             f'style="width: 100%; height: {self._height}px; '
             'border: 1px solid #dce3e8;"></iframe>'

@@ -35,7 +35,9 @@
     <h2>Customer timeline</h2>
     <div class="toolbar">
       <label for="customer-choice">Customer ID</label>
+      <button id="prev-customer" type="button" aria-label="Previous customer">&lsaquo;</button>
       <input id="customer-choice" type="number" min="1" step="1" value="1">
+      <button id="next-customer" type="button" aria-label="Next customer">&rsaquo;</button>
       <button id="show-customer">Show customer</button>
     </div>
     <p id="customer-details" class="muted"></p>
@@ -57,6 +59,8 @@
         <option value="rejected">Rejected</option>
         <option value="abandoned">Abandoned</option>
       </select>
+      <label for="type-choice" id="type-label" hidden>Type</label>
+      <select id="type-choice" hidden><option value="all">All types</option></select>
       <button id="download-customers">Download customers CSV</button>
       <button id="download-visits">Download station visits CSV</button>
     </div>
@@ -150,7 +154,16 @@ function showServiceRun(root, result, plotTemplate) {
           td.textContent = percentage && row[key] !== null ? (100 * row[key]).toFixed(1) + "%" : format(row[key]);
           tr.append(td);
         });
-        if (onRow) tr.addEventListener("click", () => onRow(row));
+        if (onRow) {
+          tr.tabIndex = 0;
+          if (row.customer_id !== undefined && row.customer_id === Number(document.getElementById("customer-choice").value)) {
+            tr.classList.add("active");
+          }
+          tr.addEventListener("click", () => onRow(row));
+          tr.addEventListener("keydown", event => {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onRow(row); }
+          });
+        }
         body.append(tr);
       });
       element.append(body);
@@ -269,7 +282,7 @@ function showServiceRun(root, result, plotTemplate) {
          customer.exit_time === null ? "Unfinished activity is shown through the service limit." :
           "Flow time: " + format(customer.flow_time) + " " + unit + ".");
       // plots.timeline_spans computes these bars, so this only draws them.
-      const spans = spansById.get(id) || [];
+      const spans = (spansById.get(id) || []).filter(row => row.end > row.start);
       const traces = Object.entries(result.timeline_colors).map(([name, color]) => {
         const selected = spans.filter(row => row.activity === name);
         return {
@@ -277,8 +290,9 @@ function showServiceRun(root, result, plotTemplate) {
           base: selected.map(row => row.start),
           x: selected.map(row => row.end - row.start),
           y: selected.map(row => escapeText(row.station)),
+          customdata: selected.map(row => [row.start, row.end]),
           marker: {color, line: {color: "black", width: 1}},
-          hovertemplate: "%{y}<br>Duration: %{x:.2f}<extra>%{fullData.name}</extra>"
+          hovertemplate: "%{y}<br>%{customdata[0]:.2f}–%{customdata[1]:.2f} (duration %{x:.2f})<extra>%{fullData.name}</extra>"
         };
       });
       Plotly.react("timeline", traces, {
@@ -292,13 +306,33 @@ function showServiceRun(root, result, plotTemplate) {
     }
     document.getElementById("show-customer").addEventListener("click", showCustomer);
     document.getElementById("customer-choice").addEventListener("change", showCustomer);
+    document.getElementById("prev-customer").addEventListener("click", () => {
+      const input = document.getElementById("customer-choice");
+      const current = Number(input.value) || 1;
+      if (current > 1) { input.value = String(current - 1); showCustomer(); customerTable(); }
+    });
+    document.getElementById("next-customer").addEventListener("click", () => {
+      const input = document.getElementById("customer-choice");
+      const current = Number(input.value) || 1;
+      if (current < customers.length) { input.value = String(current + 1); showCustomer(); customerTable(); }
+    });
     showCustomer();
     let page = 0; const pageSize = 25;
     // The type column appears only when some customer has a type.
     const typed = customers.some(row => row.customer_type !== null);
+    const typeChoice = document.getElementById("type-choice");
+    if (typed) {
+      document.getElementById("type-label").hidden = false;
+      typeChoice.hidden = false;
+      const kinds = Array.from(new Set(customers.map(row => row.customer_type).filter(v => v !== null)));
+      kinds.forEach(kind => {
+        const option = document.createElement("option"); option.value = kind; option.textContent = kind; typeChoice.append(option);
+      });
+    }
     function customerTable() {
       const status = document.getElementById("status-choice").value;
-      const rows = customers.filter(row => status === "all" || row.status === status)
+      const chosenType = typeChoice.value;
+      const rows = customers.filter(row => (status === "all" || row.status === status) && (chosenType === "all" || row.customer_type === chosenType))
         .map(row => row.status === "completed" || row.status === "abandoned" ? Object.assign({}, row, {station: "Left system"}) : row);
       const pages = Math.max(1, Math.ceil(rows.length / pageSize));
       page = Math.min(Math.max(page, 0), pages - 1);
@@ -307,12 +341,13 @@ function showServiceRun(root, result, plotTemplate) {
         ["arrival_time", "Arrival (" + unit + ")"],
         ["exit_time", "Exit (" + unit + ")"], ["flow_time", "Flow time (" + unit + ")"],
         ["status", "Status"], ["station", "Current station"]
-      ]), row => { document.getElementById("customer-choice").value = row.customer_id; showCustomer(); document.getElementById("timeline").scrollIntoView({behavior: "smooth", block: "center"}); });
+      ]), row => { document.getElementById("customer-choice").value = row.customer_id; showCustomer(); customerTable(); document.getElementById("timeline").scrollIntoView({behavior: "smooth", block: "center"}); });
       document.getElementById("page-details").textContent = "Page " + (page + 1) + " of " + pages + ". " + rows.length + " matching customers.";
       document.getElementById("previous").disabled = page === 0;
       document.getElementById("next").disabled = page === pages - 1;
     }
     document.getElementById("status-choice").addEventListener("change", () => { page = 0; customerTable(); });
+    typeChoice.addEventListener("change", () => { page = 0; customerTable(); });
     document.getElementById("previous").addEventListener("click", () => { page -= 1; customerTable(); });
     document.getElementById("next").addEventListener("click", () => { page += 1; customerTable(); });
     customerTable();
@@ -324,7 +359,8 @@ function showServiceRun(root, result, plotTemplate) {
       for (let index = 0; index < count; index += 1) lines.push(keys.map(key => quote(columns[key][index])).join(","));
       const csv = lines.join("\r\n");
       const url = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
-      const link = document.createElement("a"); link.href = url; link.download = name; link.click();
+      const link = document.createElement("a"); link.href = url; link.download = name;
+      document.body.appendChild(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
     document.getElementById("download-customers").addEventListener("click", () => download("customers.csv", result.customers, result.columns.customers));

@@ -27,6 +27,7 @@ __STYLE__
     <h2 id="interval-title"></h2>
     <p class="muted" id="interval-reading"></p>
     <div class="chart" id="scenario-means"></div>
+    <div class="toolbar"><button id="download-intervals" type="button">Download intervals CSV</button></div>
     <div class="table-wrap"><table id="interval-table"></table></div>
   </section>
   <section id="difference-section" hidden>
@@ -34,6 +35,7 @@ __STYLE__
     <p class="muted">Each difference is the scenario value minus its baseline value within the same replication. Negative values indicate a smaller metric. The dashed line marks zero.</p>
     <p class="muted" id="difference-missing" hidden></p>
     <div class="chart" id="scenario-differences"></div>
+    <div class="toolbar" id="difference-toolbar"><button id="download-differences" type="button">Download differences CSV</button></div>
     <div class="table-wrap"><table id="difference-table"></table></div>
   </section>
   <section id="replication-section">
@@ -48,12 +50,12 @@ __STYLE__
   </section>
   <div id="run-panel" hidden>
     <div class="run-header">
-      <h2 id="run-heading"></h2>
+      <h2 id="run-heading" tabindex="-1"></h2>
       <button id="close-run">Close run</button>
     </div>
     <div id="run-root"></div>
   </div>
-  <p class="muted">The saved page works offline. Intervals describe the selected finite-day statistic. They do not establish steady-state performance. Wait and flow averages exclude rejected arrivals, which can be compared separately.</p>
+  <p class="muted" id="footer-note"></p>
 </main>
 __SERVICE_RUN__
 __SUPPLY_RUN__
@@ -133,8 +135,13 @@ __RUN_DATA__
   const axisTitles = {};
   function fitAxisNote(id) {
     const chart = document.getElementById(id);
+    const existing = chart.parentElement.querySelector(".axis-note[data-chart='" + id + "']");
+    if (chart.hidden || chart.clientWidth === 0) {
+      if (existing !== null) existing.hidden = true;
+      return;
+    }
     if (!chart.layout || !(id in axisTitles)) return;
-    let note = chart.parentElement.querySelector(".axis-note[data-chart='" + id + "']");
+    let note = existing;
     if (note === null) {
       note = document.createElement("p"); note.className = "axis-note"; note.dataset.chart = id;
       chart.after(note);
@@ -158,6 +165,20 @@ __RUN_DATA__
     if (id !== "replication-values") axisTitles[id] = {title: copy.layout.xaxis.title.text, bottom: copy.layout.margin.b};
     return Plotly.react(id, copy.data, copy.layout, config).then(() => fitAxisNote(id));
   }
+  let currentIntervals = [];
+  let currentDifferences = [];
+  function downloadRowsCsv(filename, rows) {
+    if (!rows.length) return;
+    const keys = Object.keys(rows[0]);
+    const quote = value => value === null || value === undefined ? "" : '"' + String(value).replaceAll('"', '""') + '"';
+    const lines = [keys.map(quote).join(",")].concat(rows.map(row => keys.map(key => quote(row[key])).join(",")));
+    const url = URL.createObjectURL(new Blob([lines.join("\r\n")], {type: "text/csv;charset=utf-8"}));
+    const link = document.createElement("a"); link.href = url; link.download = filename;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  document.getElementById("download-intervals").addEventListener("click", () => downloadRowsCsv(metricChoice.value + "-intervals.csv", currentIntervals));
+  document.getElementById("download-differences").addEventListener("click", () => downloadRowsCsv(metricChoice.value + "-differences.csv", currentDifferences));
   function show() {
     const entry = metrics.get(metricChoice.value);
     const view = entry.views[Number(locationChoice.value)];
@@ -167,6 +188,7 @@ __RUN_DATA__
     document.getElementById("interval-title").textContent = view.title;
     document.getElementById("interval-reading").textContent = "Points show means across independent replications. Intervals show " +
       dashboard.confidence_text + " Student t uncertainty across run estimates.";
+    currentIntervals = view.intervals;
     intervalTable(document.getElementById("interval-table"), entry, view.intervals, place);
     const drawing = [draw("scenario-means", view.means)];
     const section = document.getElementById("difference-section");
@@ -179,17 +201,21 @@ __RUN_DATA__
       missing.hidden = changes !== null;
       missing.textContent = changes === null ? "No other scenario shares this location with " + baseline + ", so there are no paired differences." : "";
       document.getElementById("scenario-differences").hidden = changes === null;
+      document.getElementById("difference-toolbar").hidden = changes === null;
       if (changes !== null) {
+        currentDifferences = changes.intervals;
         intervalTable(document.getElementById("difference-table"), entry, changes.intervals, place);
         drawing.push(draw("scenario-differences", changes.figure));
       } else {
+        currentDifferences = [];
         document.getElementById("difference-table").replaceChildren();
+        fitAxisNote("scenario-differences");
       }
     }
     drawing.push(draw("replication-values", view.runs));
     return Promise.all(drawing);
   }
-  // Each run's records sit in their own script element, parsed when the run opens.
+  // Each run's records sit in their own script element, parsed (and gunzipped) when opened.
   const runs = [];
   dashboard.runs.forEach((scenarioRuns, scenario) => scenarioRuns.forEach((run, replication) => {
     runs.push(Object.assign({scenario, replication}, run));
@@ -197,23 +223,44 @@ __RUN_DATA__
   runs.forEach((run, index) => {
     const option = document.createElement("option"); option.value = String(index); option.textContent = run.label; runChoice.append(option);
   });
+  const isSupply = dashboard.kind === "supply";
+  document.getElementById("footer-note").textContent =
+    "The saved page works offline. Intervals describe the selected finite-horizon statistic. They do not establish steady-state performance." +
+    (isSupply ? "" : " Wait and flow averages exclude rejected arrivals, which can be compared separately.");
   document.getElementById("replication-reading").textContent = dashboard.records ?
-    "Each point is one run's value. Select a point, or choose a run below, to open that run's queues, waits, utilization, server states, and customer timelines on this page." :
+    (isSupply ?
+      "Each point is one run's value. Select a point, or choose a run below, to open that run's orders, stock levels, backorders, and shipments on this page." :
+      "Each point is one run's value. Select a point, or choose a run below, to open that run's queues, waits, utilization, server states, and customer timelines on this page.") :
     "Each point is one run's value. Each run's records were dropped by keep_records=False, so this page shows the overview only. Run the experiment with keep_records=True to open single runs from it.";
   document.getElementById("run-toolbar").hidden = !dashboard.records;
   const runPanel = document.getElementById("run-panel");
   const runRoot = document.getElementById("run-root");
+  async function decodeRunElement(element) {
+    if (element.type === "application/gzip;base64") {
+      const binary = atob(element.textContent.trim());
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+      return JSON.parse(await new Response(stream).text());
+    }
+    return JSON.parse(element.textContent);
+  }
   function openRun(scenario, replication) {
     if (!dashboard.records) return Promise.resolve();
     const index = runs.findIndex(run => run.scenario === scenario && run.replication === replication);
     const run = runs[index];
     runChoice.value = String(index);
-    const result = JSON.parse(document.getElementById("run-" + scenario + "-" + replication).textContent);
-    runPanel.hidden = false;
-    document.getElementById("run-heading").textContent = run.label;
-    const showRun = result.kind === "supply" ? showSupplyRun : showServiceRun;
-    window.flowsimRunReady = showRun(runRoot, result, plotTemplate);
-    runPanel.scrollIntoView({behavior: "smooth", block: "start"});
+    const element = document.getElementById("run-" + scenario + "-" + replication);
+    window.flowsimRunReady = decodeRunElement(element).then(result => {
+      runPanel.hidden = false;
+      const heading = document.getElementById("run-heading");
+      heading.textContent = run.label;
+      const showRun = result.kind === "supply" ? showSupplyRun : showServiceRun;
+      const ready = showRun(runRoot, result, plotTemplate);
+      runPanel.scrollIntoView({behavior: "smooth", block: "start"});
+      heading.focus({preventScroll: true});
+      return ready;
+    });
     return window.flowsimRunReady;
   }
   document.getElementById("open-run").addEventListener("click", () => {
@@ -222,6 +269,7 @@ __RUN_DATA__
   document.getElementById("close-run").addEventListener("click", () => {
     runRoot.querySelectorAll(".js-plotly-plot").forEach(chart => Plotly.purge(chart));
     runRoot.replaceChildren(); runPanel.hidden = true;
+    document.getElementById("open-run").focus({preventScroll: true});
   });
   metricChoice.addEventListener("change", () => {
     const entry = metrics.get(metricChoice.value);

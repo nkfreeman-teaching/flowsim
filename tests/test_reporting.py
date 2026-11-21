@@ -532,12 +532,12 @@ def test_viewer_holds_the_document_and_saves_it(tmp_path):
 def test_viewer_displays_in_an_isolated_frame_and_prints_briefly():
     viewer = deterministic_queue().run(duration=7).viewer()
     frame = viewer._repr_html_()
-    assert frame.startswith('<iframe srcdoc="')
+    assert frame.startswith("<iframe srcdoc='")
     assert 'sandbox="allow-scripts allow-downloads"' in frame
     assert "allow-same-origin" not in frame
     # The document is escaped inside srcdoc, so no tag reaches the notebook.
     assert "<script" not in frame
-    srcdoc = re.match(r'<iframe srcdoc="([^"]*)"', frame).group(1)
+    srcdoc = re.match(r"<iframe srcdoc='([^']*)'", frame).group(1)
     assert "&lt;script" in srcdoc
     text = repr(viewer)
     assert len(text) < 200
@@ -762,6 +762,8 @@ def test_run_settings_are_frozen_and_plumbing_is_private():
         "plot_wait",
         "plot_utilization",
         "plot_resources",
+        "plot_gantt",
+        "plot_wip",
         "plot_customer",
         "plot_inventory",
         "plot_orders",
@@ -799,6 +801,7 @@ def test_experiment_and_comparison_settings_omit_values_that_differ(comparison):
         "stations",
         "stock_points",
         "stock_point_names",
+        "plot_warmup",
     }
     assert public_names(comparison) == shared_names | {
         "experiments",
@@ -969,3 +972,62 @@ def test_experiment_and_comparison_table_estimate_and_by_type():
     assert by_type.get_column("customer_type").to_list() == ["A"]
     assert by_type.get_column("completed").to_list() == [2]
     assert by_type.get_column("mean_flow_time").to_list() == [2.5]
+
+
+def test_new_diagnostic_plots_render_expected_traces():
+    run = service_network().run(
+        duration=120,
+        seed=7,
+        warmup=20,
+        drain=True,
+    )
+    gantt = run.plot_gantt(start=0, end=40)
+    assert gantt.data
+    assert gantt.layout.barmode == "overlay"
+
+    wip = run.plot_wip()
+    assert wip.data[0].name == "In system (WIP)"
+    assert len(wip.layout.shapes) == 2  # Warm-up and Closing
+
+    ecdf = run.plot_wait("Service", kind="ecdf")
+    assert ecdf.data[0].type == "scatter"
+    assert ecdf.layout.yaxis.title.text == "Cumulative share"
+
+    breakdown = run.plot_utilization(breakdown=True)
+    assert breakdown.layout.barmode == "stack"
+    assert [trace.name for trace in breakdown.data] == [
+        "Processing",
+        "Blocked",
+        "Paused",
+        "Idle",
+    ]
+
+    exp = service_network().experiment(
+        duration=120,
+        replications=3,
+        seed=5,
+        warmup=20,
+    )
+    welch = exp.plot_warmup(metric="wip", window=3)
+    assert len(welch.data) == 2
+    assert "Welch" in welch.data[1].name
+    chain_exp = beer_chain().experiment(
+        duration=30,
+        replications=2,
+        seed=7,
+    )
+    chain_welch = chain_exp.plot_warmup(metric="on_hand", stock_point="Retailer")
+    assert len(chain_welch.data) == 1
+
+
+def test_stack_preserves_label_dtype_for_empty_tables():
+    empty = pl.DataFrame(schema={"value": pl.Float64})
+    non_empty = pl.DataFrame({"value": [1.0]})
+    from flowsim.results import stack
+
+    first = stack([(1, empty), (2, empty)], column="replication")
+    second = stack([(1, non_empty), (2, non_empty)], column="replication")
+    assert first.schema["replication"] == pl.Int64
+    combined = stack([("Empty", first), ("Full", second)], column="scenario")
+    assert combined.height == 2
+    assert combined.get_column("scenario").to_list() == ["Full", "Full"]
